@@ -23,7 +23,7 @@ const MAX_BG_CACHE = 4
 let bgAbort: AbortController | null = null
 let bgReqToken = 0 // yarış önleyici token
 
-const MASK_SHORT_SIDE = 256
+const MASK_SHORT_SIDE = 192 // Düşürüldü: 256 -> 192 (daha düşük performans için)
 const DEBUG_INVERT = false
 
 function pickPersonIndex(ls: string[]) {
@@ -125,8 +125,8 @@ async function maskToImageBitmap(
 // --- BG yükleme: token + LRU + asla aktif olanı kapatma ---
 async function loadBackground(url: string) {
   if (!url) return
-  const w = canvas?.width || 1280
-  const h = canvas?.height || 720
+  const w = canvas?.width || 960 // Düşürüldü: 1280 -> 960 (daha düşük performans için)
+  const h = canvas?.height || 540 // Düşürüldü: 720 -> 540
   const key = `${url}@${w}x${h}`
 
   // Aynı görsel/ölçü zaten kullanılıyorsa
@@ -166,7 +166,7 @@ async function loadBackground(url: string) {
     const bmp = await createImageBitmap(blob, {
       resizeWidth: w,
       resizeHeight: h,
-      resizeQuality: "high",
+      resizeQuality: "medium", // Düşürüldü: "high" -> "medium" (daha hızlı)
     })
 
     // Eski istekse çöpe at
@@ -221,7 +221,7 @@ self.onmessage = async (e: MessageEvent) => {
         baseOptions: { modelAssetPath: modelUrl, delegate: "CPU" },
         runningMode: "VIDEO",
         outputCategoryMask: true,
-        outputConfidenceMasks: true,
+        outputConfidenceMasks: false, // Kapatıldı: daha düşük performans için
       })
 
       labels = (segmenter as any).getLabels?.() ?? []
@@ -261,7 +261,7 @@ self.onmessage = async (e: MessageEvent) => {
       const small = await createImageBitmap(frame, {
         resizeWidth: smallW,
         resizeHeight: smallH,
-        resizeQuality: "high",
+        resizeQuality: "medium", // Düşürüldü: "high" -> "medium" (daha hızlı)
       })
       const ts = performance.now()
       const res = await segmenter!.segmentForVideo(small, ts)

@@ -37,7 +37,7 @@ export default function UploadFromPhone() {
       const fd = new FormData()
       Array.from(files).forEach((f) => fd.append("files", f))
 
-      const apiUrl = `http://localhost:3001/api/v1/uploads/${slotId}`
+      const apiUrl = `http://booth-api.cloud.solucharger.com/api/v1/uploads/${slotId}`
       console.log("Uploading to:", apiUrl)
       console.log(
         "Files:",

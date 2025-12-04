@@ -10,10 +10,13 @@ export default function Home() {
       return
     }
     try {
-      const res = await fetch("http://localhost:3001/api/v1/test", {
-        method: "GET",
-        credentials: "include",
-      })
+      const res = await fetch(
+        "http://booth-api.cloud.solucharger.com/api/v1/test",
+        {
+          method: "GET",
+          credentials: "include",
+        }
+      )
 
       // Eğer HTTP 200 değilse, BG-Sync kuyruğa alındığını varsayıp mesaj göster
       if (!res.ok) {
@@ -38,10 +41,13 @@ export default function Home() {
     const onOnline = async () => {
       setStatus("Ağ geri geldi; isteği yeniden deniyoruz…")
       try {
-        const res = await fetch("http://localhost:3001/api/v1/test", {
-          method: "GET",
-          credentials: "include",
-        })
+        const res = await fetch(
+          "http://booth-api.cloud.solucharger.com/api/v1/test",
+          {
+            method: "GET",
+            credentials: "include",
+          }
+        )
         if (res.ok) {
           setStatus("API isteği başarıyla çekildi.")
         } else {

@@ -53,7 +53,7 @@ function PhoneToPrintContent() {
       esRef.current = null
     }
     const es = new EventSource(
-      `http://localhost:3001/api/v1/phoneToPrint/subscribe/${slot}`
+      `http://booth-api.cloud.solucharger.com/api/v1/phoneToPrint/subscribe/${slot}`
     )
 
     es.onopen = () => {
@@ -74,7 +74,7 @@ function PhoneToPrintContent() {
             // backend zaten /static/... veriyor; tam URL oluştur
             dataUrl: f.publicUrl?.startsWith("http")
               ? f.publicUrl
-              : `http://localhost:3001${f.publicUrl}`,
+              : `http://booth-api.cloud.solucharger.com${f.publicUrl}`,
           }))
           console.log("Setting previews:", next)
           setPreviews(next)

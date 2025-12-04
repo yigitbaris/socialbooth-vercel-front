@@ -52,7 +52,8 @@ function PrintSharePageContent() {
 
   // Kiosk local print servisi URL'i (env üzerinden override edilebilir)
   const KIOSK_PRINT_URL =
-    process.env.NEXT_PUBLIC_KIOSK_PRINT_URL || "http://localhost:3001/print"
+    process.env.NEXT_PUBLIC_KIOSK_PRINT_URL ||
+    "http://booth-api.cloud.solucharger.com/print"
 
   useEffect(() => {
     // Load printer animation JSON from public
@@ -103,7 +104,7 @@ function PrintSharePageContent() {
             // dataUrl: Kiosk servisine dataURL veya base64 göndereceğiz
             dataUrl: photo.url.startsWith("data:")
               ? photo.url
-              : `http://localhost:3001${photo.url}`,
+              : `http://booth-api.cloud.solucharger.com${photo.url}`,
             size: "4x6", // Gerekirse UI'den okunabilir
             copies,
             landscape: false,
@@ -297,7 +298,7 @@ function PrintSharePageContent() {
               {photos.map(({ id, url }, i) => {
                 const src = url.startsWith("data:")
                   ? url
-                  : `http://localhost:3001${url}`
+                  : `http://booth-api.cloud.solucharger.com${url}`
                 return (
                   <FramedPhoto key={id} src={src} alt={`Fotoğraf ${i + 1}`} />
                 )

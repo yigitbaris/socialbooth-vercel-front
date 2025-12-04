@@ -278,7 +278,7 @@ function SelfiePageContent() {
             />
           ) : (
             <img
-              src={`http://localhost:3001${photos[selectedIdx].url}`}
+              src={`http://booth-api.cloud.solucharger.com${photos[selectedIdx].url}`}
               alt={`Fotoğraf ${selectedIdx + 1}`}
               className="absolute top-0 left-0 w-full h-full object-cover rounded-2xl"
             />
@@ -519,7 +519,7 @@ function SelfiePageContent() {
                       }`}
                     >
                       <img
-                        src={`http://localhost:3001${photos[idx].url}`}
+                        src={`http://booth-api.cloud.solucharger.com${photos[idx].url}`}
                         alt={`Fotoğraf ${idx + 1}`}
                         className="w-full h-full object-cover"
                       />

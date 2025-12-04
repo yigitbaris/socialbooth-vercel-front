@@ -33,7 +33,8 @@ const withPWA = require("next-pwa")({
   disable: process.env.NODE_ENV === "development",
 })
 
-const API_ORIGIN = process.env.NEXT_PUBLIC_API_ORIGIN || "http://localhost:3001"
+const API_ORIGIN =
+  process.env.NEXT_PUBLIC_API_ORIGIN || "http://booth-api.cloud.solucharger.com"
 
 module.exports = withPWA({
   eslint: {

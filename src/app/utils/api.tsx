@@ -1,17 +1,4 @@
 // eski api.tsx
-/*
-import axios from "axios"
-
-const api = axios.create({
-  baseURL: "http://localhost:3001/api/v1",
-  headers: {
-    "Content-Type": "application/json",
-  },
-})
-
-export default api
-*/
-
 import axios from "axios"
 
 const api = axios.create({
@@ -22,6 +9,6 @@ const api = axios.create({
 
 export default api
 
-export const baseUrl = "http://74.234.77.71:27020"
-//export const apiUrl = "http://localhost:3000/api/v1"
-export const apiUrl = "http://74.234.77.71:27020/api/v1"
+export const baseUrl = "http://booth-api.cloud.solucharger.com"
+// export const apiUrl = "http://localhost:3000/api/v1"
+export const apiUrl = "http://booth-api.cloud.solucharger.com/api/v1"

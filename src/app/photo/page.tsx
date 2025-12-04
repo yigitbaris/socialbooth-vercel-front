@@ -25,6 +25,8 @@ function PhotoPageContent() {
   const offscreenDoneRef = useRef(false)
   const workerReadyRef = useRef(false)
   const pumpingRef = useRef(false)
+  const workerBusyRef = useRef(false)
+  const lastFrameTimeRef = useRef(0)
 
   const params = useSearchParams()
   const photoCount = parseInt(params.get("photoCount") ?? "1")
@@ -270,7 +272,14 @@ function PhotoPageContent() {
 
       ;(async () => {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true })
+          // Kamera constraint'leri: 1280x720 @ 30fps
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280, max: 1280 },
+              height: { ideal: 720, max: 720 },
+              frameRate: { ideal: 30, max: 30 },
+            },
+          })
           if (!videoRef.current) return
           videoRef.current.srcObject = stream
           videoRef.current.muted = true
@@ -279,11 +288,11 @@ function PhotoPageContent() {
           if (cancelled) return
 
           if (!offscreenDoneRef.current && previewCanvasRef.current) {
-            const v = videoRef.current!
-            const canvasW = v.videoWidth || 1920
-            const canvasH = v.videoHeight || 1080
-            previewCanvasRef.current.width = canvasW
-            previewCanvasRef.current.height = canvasH
+            // Preview canvas 3:2 oranında (4x6) - 1800x1200
+            const targetW = 1800
+            const targetH = 1200 // 3:2 = 4x6 oranı
+            previewCanvasRef.current.width = targetW
+            previewCanvasRef.current.height = targetH
             const offscreen =
               previewCanvasRef.current.transferControlToOffscreen()
             offscreenDoneRef.current = true
@@ -304,6 +313,9 @@ function PhotoPageContent() {
                   })
                 }
                 pump()
+              } else if (type === "idle") {
+                // Worker işlemi bitirdi, yeni frame gönderebiliriz
+                workerBusyRef.current = false
               }
             }
 
@@ -327,19 +339,48 @@ function PhotoPageContent() {
           async function pump() {
             if (cancelled || pumpingRef.current) return
             pumpingRef.current = true
+            lastFrameTimeRef.current = 0
 
             const v = videoRef.current!
-            const loop = async () => {
-              if (cancelled) return
-              const frame = await createImageBitmap(v)
-              workerRef.current?.postMessage({ type: "frame", frame }, [frame])
+            const loop = async (now: number) => {
+              if (cancelled || !workerReadyRef.current) return
+
+              // FPS throttling: 30 FPS = ~33ms per frame
+              const elapsed = now - lastFrameTimeRef.current
+              if (elapsed < 33 || workerBusyRef.current) {
+                if ("requestVideoFrameCallback" in v) {
+                  ;(v as any).requestVideoFrameCallback(loop)
+                } else {
+                  setTimeout(() => loop(performance.now()), 16)
+                }
+                return
+              }
+
+              lastFrameTimeRef.current = now
+              workerBusyRef.current = true
+
+              try {
+                const frame = await createImageBitmap(v)
+                workerRef.current?.postMessage({ type: "frame", frame }, [
+                  frame,
+                ])
+              } catch (err) {
+                console.error("Frame creation error:", err)
+                workerBusyRef.current = false
+              }
+
+              // Worker idle mesajı geldiğinde workerBusyRef.current = false olacak
               if ("requestVideoFrameCallback" in v) {
                 ;(v as any).requestVideoFrameCallback(loop)
               } else {
-                setTimeout(loop, 16)
+                setTimeout(() => loop(performance.now()), 16)
               }
             }
-            loop()
+            if ("requestVideoFrameCallback" in v) {
+              ;(v as any).requestVideoFrameCallback(loop)
+            } else {
+              loop(performance.now())
+            }
           }
         } catch (e) {
           console.error(e)
@@ -350,6 +391,8 @@ function PhotoPageContent() {
         cancelled = true
         pumpingRef.current = false
         workerReadyRef.current = false
+        workerBusyRef.current = false
+        lastFrameTimeRef.current = 0
         workerRef.current?.terminate()
         workerRef.current = null
         offscreenDoneRef.current = false

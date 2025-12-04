@@ -26,6 +26,16 @@ let bgReqToken = 0 // yarış önleyici token
 const MASK_SHORT_SIDE = 192 // Düşürüldü: 256 -> 192 (daha düşük performans için)
 const DEBUG_INVERT = false
 
+// Segmentasyon için işleme çözünürlüğü (3:2 oranında)
+const PROCESS_WIDTH = 640
+const PROCESS_HEIGHT = 426 // 3:2 = 4x6 oranı (640/426 ≈ 1.502)
+
+// Mask kenarı yumuşatma (feather/blur radius)
+const FEATHER_RADIUS = 12 // 8-16px aralığında
+
+// Frame skip için busy flag
+let isProcessingFrame = false
+
 function pickPersonIndex(ls: string[]) {
   const i = ls.findIndex((l) => /person|selfie|human/i.test(l))
   return i >= 0 ? i : 1
@@ -35,6 +45,75 @@ function ensureFgCanvasSize(w: number, h: number) {
   if (!fgCanvas || !fgCtx || fgCanvas.width !== w || fgCanvas.height !== h) {
     fgCanvas = new OffscreenCanvas(w, h)
     fgCtx = fgCanvas.getContext("2d") as OffscreenCanvasRenderingContext2D
+  }
+}
+
+// Mask kenarına feather/blur uygula
+async function applyFeatherToMask(
+  maskBitmap: ImageBitmap,
+  radius: number
+): Promise<ImageBitmap | null> {
+  try {
+    const tmp = new OffscreenCanvas(maskBitmap.width, maskBitmap.height)
+    const tctx = tmp.getContext("2d")!
+    tctx.drawImage(maskBitmap, 0, 0)
+
+    // Gaussian blur için canvas filter kullan (eğer destekleniyorsa)
+    // Fallback: basit alpha kanalı manipülasyonu
+    const imageData = tctx.getImageData(
+      0,
+      0,
+      maskBitmap.width,
+      maskBitmap.height
+    )
+    const data = imageData.data
+
+    // Basit blur: alpha kanalını yumuşat
+    // Her piksel için çevresindeki piksellerin ortalamasını al
+    const blurred = new Uint8ClampedArray(data.length)
+    const r = Math.max(1, Math.floor(radius))
+
+    for (let y = 0; y < maskBitmap.height; y++) {
+      for (let x = 0; x < maskBitmap.width; x++) {
+        let sum = 0
+        let count = 0
+
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            const nx = x + dx
+            const ny = y + dy
+            if (
+              nx >= 0 &&
+              nx < maskBitmap.width &&
+              ny >= 0 &&
+              ny < maskBitmap.height
+            ) {
+              const idx = (ny * maskBitmap.width + nx) * 4 + 3
+              sum += data[idx]
+              count++
+            }
+          }
+        }
+
+        const idx = (y * maskBitmap.width + x) * 4
+        blurred[idx] = data[idx] // R
+        blurred[idx + 1] = data[idx + 1] // G
+        blurred[idx + 2] = data[idx + 2] // B
+        blurred[idx + 3] = Math.round(sum / count) // A (yumuşatılmış)
+      }
+    }
+
+    const blurredImageData = new ImageData(
+      blurred,
+      maskBitmap.width,
+      maskBitmap.height
+    )
+    tctx.putImageData(blurredImageData, 0, 0)
+
+    return await createImageBitmap(tmp)
+  } catch (e) {
+    console.warn("Feather apply failed, returning original", e)
+    return maskBitmap
   }
 }
 
@@ -243,35 +322,42 @@ self.onmessage = async (e: MessageEvent) => {
   }
 
   if (data.type === "frame") {
+    // Frame skip: Önceki kare hala işleniyorsa yeni kareyi drop et
+    if (isProcessingFrame) {
+      const frame: ImageBitmap = data.frame
+      frame.close()
+      return
+    }
+
     const frame: ImageBitmap = data.frame
+    isProcessingFrame = true
+
     try {
+      // Canvas boyutu 4x6 oranında olmalı (zaten init'te ayarlandı)
       if (!canvas.width || !canvas.height) {
-        canvas.width = frame.width
-        canvas.height = frame.height
+        // Fallback: 3:2 oranında varsayılan boyut
+        canvas.width = 1800
+        canvas.height = 1200
       }
       ensureFgCanvasSize(canvas.width, canvas.height)
 
-      // segmentation
-      const k = Math.min(
-        MASK_SHORT_SIDE / frame.width,
-        MASK_SHORT_SIDE / frame.height
-      )
-      const smallW = Math.max(1, Math.round(frame.width * k))
-      const smallH = Math.max(1, Math.round(frame.height * k))
-      const small = await createImageBitmap(frame, {
-        resizeWidth: smallW,
-        resizeHeight: smallH,
-        resizeQuality: "medium", // Düşürüldü: "high" -> "medium" (daha hızlı)
-      })
-      const ts = performance.now()
-      const res = await segmenter!.segmentForVideo(small, ts)
-      small.close()
+      // Segmentasyon için düşük çözünürlüklü işleme (3:2 oranında)
+      const processCanvas = new OffscreenCanvas(PROCESS_WIDTH, PROCESS_HEIGHT)
+      const processCtx = processCanvas.getContext("2d")!
+      processCtx.drawImage(frame, 0, 0, PROCESS_WIDTH, PROCESS_HEIGHT)
 
-      // foreground
+      // Segmentation işlemi için küçük canvas'ı ImageBitmap'e çevir
+      const processBitmap = await createImageBitmap(processCanvas)
+      const ts = performance.now()
+      const res = await segmenter!.segmentForVideo(processBitmap, ts)
+      processBitmap.close()
+
+      // Foreground: frame'i canvas boyutuna çiz
       fgCtx!.globalCompositeOperation = "source-over"
       fgCtx!.clearRect(0, 0, canvas.width, canvas.height)
       fgCtx!.drawImage(frame, 0, 0, canvas.width, canvas.height)
 
+      // Mask'i al ve canvas boyutuna scale et
       let maskBitmap: ImageBitmap | null = null
       const cm = (res as any).confidenceMasks
       if (cm && cm[personIdx]) {
@@ -282,20 +368,38 @@ self.onmessage = async (e: MessageEvent) => {
         )
       }
       if (!maskBitmap) maskBitmap = await maskToImageBitmap(res)
+
       if (maskBitmap) {
-        fgCtx!.globalCompositeOperation = "destination-in"
-        fgCtx!.drawImage(maskBitmap, 0, 0, canvas.width, canvas.height)
-        maskBitmap.close?.()
+        // Mask'i canvas boyutuna scale et
+        const scaledMask = new OffscreenCanvas(canvas.width, canvas.height)
+        const scaledMaskCtx = scaledMask.getContext("2d")!
+        scaledMaskCtx.drawImage(maskBitmap, 0, 0, canvas.width, canvas.height)
+        maskBitmap.close()
+
+        // Feather/blur uygula (kenar yumuşatma)
+        const featheredMaskBitmap = await createImageBitmap(scaledMask)
+        const featheredMask = await applyFeatherToMask(
+          featheredMaskBitmap,
+          FEATHER_RADIUS
+        )
+        featheredMaskBitmap.close()
+
+        if (featheredMask) {
+          // Mask'i foreground'a uygula
+          fgCtx!.globalCompositeOperation = "destination-in"
+          fgCtx!.drawImage(featheredMask, 0, 0, canvas.width, canvas.height)
+          featheredMask.close()
+        }
       }
       fgCtx!.globalCompositeOperation = "source-over"
 
-      // compose
+      // Compose: background + foreground
       ctx.globalCompositeOperation = "source-over"
       if (bgBitmap) {
         try {
           ctx.drawImage(bgBitmap, 0, 0, canvas.width, canvas.height)
         } catch (e) {
-          // Eğer bir şekilde detached yakalarsak: bg’yi bırak ve beyaz boya
+          // Eğer bir şekilde detached yakalarsak: bg'yi bırak ve beyaz boya
           bgBitmap = null
           ctx.fillStyle = "#ffffff"
           ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -326,6 +430,9 @@ self.onmessage = async (e: MessageEvent) => {
       } catch {}
     } finally {
       frame.close()
+      isProcessingFrame = false
+      // İşleme bitti, ana thread'e idle mesajı gönder
+      ;(self as any).postMessage({ type: "idle" })
     }
   }
 }

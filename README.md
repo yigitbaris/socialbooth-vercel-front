@@ -1,1 +1,1 @@
-# socialbooth-vercel-front
+# SocialBooth-Frontend

@@ -203,12 +203,13 @@ function PhotoPageContent() {
     setShowBackgroundConfirmModal(false)
     setPendingBackgroundSelection(null)
 
-    if (workerReadyRef.current && pendingBackgroundSelection) {
-      workerRef.current?.postMessage({
-        type: "setBackground",
-        url: pendingBackgroundSelection,
-      })
-    }
+    // Arka plan kaldırma işlemi comment'e alındı
+    // if (workerReadyRef.current && pendingBackgroundSelection) {
+    //   workerRef.current?.postMessage({
+    //     type: "setBackground",
+    //     url: pendingBackgroundSelection,
+    //   })
+    // }
   }
   const cancelBackgroundSelection = () => {
     setShowBackgroundConfirmModal(false)
@@ -287,101 +288,102 @@ function PhotoPageContent() {
 
           if (cancelled) return
 
-          if (!offscreenDoneRef.current && previewCanvasRef.current) {
-            // Preview canvas 3:2 oranında (4x6) - 1800x1200
-            const targetW = 1800
-            const targetH = 1200 // 3:2 = 4x6 oranı
-            previewCanvasRef.current.width = targetW
-            previewCanvasRef.current.height = targetH
-            const offscreen =
-              previewCanvasRef.current.transferControlToOffscreen()
-            offscreenDoneRef.current = true
+          // Arka plan kaldırma işlemi comment'e alındı
+          // if (!offscreenDoneRef.current && previewCanvasRef.current) {
+          //   // Preview canvas 3:2 oranında (4x6) - 1800x1200
+          //   const targetW = 1800
+          //   const targetH = 1200 // 3:2 = 4x6 oranı
+          //   previewCanvasRef.current.width = targetW
+          //   previewCanvasRef.current.height = targetH
+          //   const offscreen =
+          //     previewCanvasRef.current.transferControlToOffscreen()
+          //   offscreenDoneRef.current = true
 
-            workerRef.current = new Worker(
-              new URL("./segment-worker.ts", import.meta.url),
-              { type: "module" }
-            )
+          //   workerRef.current = new Worker(
+          //     new URL("./segment-worker.ts", import.meta.url),
+          //     { type: "module" }
+          //   )
 
-            workerRef.current.onmessage = (ev: MessageEvent) => {
-              const { type } = ev.data || {}
-              if (type === "ready") {
-                workerReadyRef.current = true
-                if (selectedBg) {
-                  workerRef.current?.postMessage({
-                    type: "setBackground",
-                    url: selectedBg,
-                  })
-                }
-                pump()
-              } else if (type === "idle") {
-                // Worker işlemi bitirdi, yeni frame gönderebiliriz
-                workerBusyRef.current = false
-              }
-            }
+          //   workerRef.current.onmessage = (ev: MessageEvent) => {
+          //     const { type } = ev.data || {}
+          //     if (type === "ready") {
+          //       workerReadyRef.current = true
+          //       if (selectedBg) {
+          //         workerRef.current?.postMessage({
+          //           type: "setBackground",
+          //           url: selectedBg,
+          //         })
+          //       }
+          //       pump()
+          //     } else if (type === "idle") {
+          //       // Worker işlemi bitirdi, yeni frame gönderebiliriz
+          //       workerBusyRef.current = false
+          //     }
+          //   }
 
-            const modelUrl = new URL(
-              "/models/selfie_segmenter_landscape.tflite",
-              location.origin
-            ).toString()
-            const wasmBaseUrl = new URL(
-              "/mediapipe/wasm/",
-              location.origin
-            ).toString()
+          //   const modelUrl = new URL(
+          //     "/models/selfie_segmenter_landscape.tflite",
+          //     location.origin
+          //   ).toString()
+          //   const wasmBaseUrl = new URL(
+          //     "/mediapipe/wasm/",
+          //     location.origin
+          //   ).toString()
 
-            workerRef.current.postMessage(
-              { type: "init", canvas: offscreen, modelUrl, wasmBaseUrl },
-              [offscreen]
-            )
-          } else {
-            pump()
-          }
+          //   workerRef.current.postMessage(
+          //     { type: "init", canvas: offscreen, modelUrl, wasmBaseUrl },
+          //     [offscreen]
+          //   )
+          // } else {
+          //   pump()
+          // }
 
-          async function pump() {
-            if (cancelled || pumpingRef.current) return
-            pumpingRef.current = true
-            lastFrameTimeRef.current = 0
+          // async function pump() {
+          //   if (cancelled || pumpingRef.current) return
+          //   pumpingRef.current = true
+          //   lastFrameTimeRef.current = 0
 
-            const v = videoRef.current!
-            const loop = async (now: number) => {
-              if (cancelled || !workerReadyRef.current) return
+          //   const v = videoRef.current!
+          //   const loop = async (now: number) => {
+          //     if (cancelled || !workerReadyRef.current) return
 
-              // FPS throttling: 30 FPS = ~33ms per frame
-              const elapsed = now - lastFrameTimeRef.current
-              if (elapsed < 33 || workerBusyRef.current) {
-                if ("requestVideoFrameCallback" in v) {
-                  ;(v as any).requestVideoFrameCallback(loop)
-                } else {
-                  setTimeout(() => loop(performance.now()), 16)
-                }
-                return
-              }
+          //     // FPS throttling: 30 FPS = ~33ms per frame
+          //     const elapsed = now - lastFrameTimeRef.current
+          //     if (elapsed < 33 || workerBusyRef.current) {
+          //       if ("requestVideoFrameCallback" in v) {
+          //         ;(v as any).requestVideoFrameCallback(loop)
+          //       } else {
+          //         setTimeout(() => loop(performance.now()), 16)
+          //       }
+          //       return
+          //     }
 
-              lastFrameTimeRef.current = now
-              workerBusyRef.current = true
+          //     lastFrameTimeRef.current = now
+          //     workerBusyRef.current = true
 
-              try {
-                const frame = await createImageBitmap(v)
-                workerRef.current?.postMessage({ type: "frame", frame }, [
-                  frame,
-                ])
-              } catch (err) {
-                console.error("Frame creation error:", err)
-                workerBusyRef.current = false
-              }
+          //     try {
+          //       const frame = await createImageBitmap(v)
+          //       workerRef.current?.postMessage({ type: "frame", frame }, [
+          //         frame,
+          //       ])
+          //     } catch (err) {
+          //       console.error("Frame creation error:", err)
+          //       workerBusyRef.current = false
+          //     }
 
-              // Worker idle mesajı geldiğinde workerBusyRef.current = false olacak
-              if ("requestVideoFrameCallback" in v) {
-                ;(v as any).requestVideoFrameCallback(loop)
-              } else {
-                setTimeout(() => loop(performance.now()), 16)
-              }
-            }
-            if ("requestVideoFrameCallback" in v) {
-              ;(v as any).requestVideoFrameCallback(loop)
-            } else {
-              loop(performance.now())
-            }
-          }
+          //     // Worker idle mesajı geldiğinde workerBusyRef.current = false olacak
+          //     if ("requestVideoFrameCallback" in v) {
+          //       ;(v as any).requestVideoFrameCallback(loop)
+          //     } else {
+          //       setTimeout(() => loop(performance.now()), 16)
+          //     }
+          //   }
+          //   if ("requestVideoFrameCallback" in v) {
+          //     ;(v as any).requestVideoFrameCallback(loop)
+          //   } else {
+          //     loop(performance.now())
+          //   }
+          // }
         } catch (e) {
           console.error(e)
         }
@@ -389,13 +391,14 @@ function PhotoPageContent() {
 
       return () => {
         cancelled = true
-        pumpingRef.current = false
-        workerReadyRef.current = false
-        workerBusyRef.current = false
-        lastFrameTimeRef.current = 0
-        workerRef.current?.terminate()
-        workerRef.current = null
-        offscreenDoneRef.current = false
+        // Arka plan kaldırma worker cleanup'ı comment'e alındı
+        // pumpingRef.current = false
+        // workerReadyRef.current = false
+        // workerBusyRef.current = false
+        // lastFrameTimeRef.current = 0
+        // workerRef.current?.terminate()
+        // workerRef.current = null
+        // offscreenDoneRef.current = false
         if (videoRef.current?.srcObject) {
           ;(videoRef.current.srcObject as MediaStream)
             .getTracks()
@@ -403,9 +406,10 @@ function PhotoPageContent() {
         }
       }
     } else {
-      workerRef.current?.terminate()
-      workerRef.current = null
-      offscreenDoneRef.current = false
+      // Arka plan kaldırma worker cleanup'ı comment'e alındı
+      // workerRef.current?.terminate()
+      // workerRef.current = null
+      // offscreenDoneRef.current = false
       if (videoRef.current?.srcObject) {
         ;(videoRef.current.srcObject as MediaStream)
           .getTracks()
@@ -464,7 +468,8 @@ function PhotoPageContent() {
   }
 
   const actualCapture = async () => {
-    if (!previewCanvasRef.current) return
+    // Arka plan kaldırma canvas'ı kullanmak yerine video'dan direkt capture alıyoruz
+    if (!videoRef.current) return
     if (shutterAudioRef.current) {
       shutterAudioRef.current.currentTime = 0
       try {
@@ -472,7 +477,8 @@ function PhotoPageContent() {
       } catch {}
     }
 
-    const src = previewCanvasRef.current
+    // Video'dan direkt capture al
+    const video = videoRef.current
 
     // 4x6 oranlı (3/2) offscreen canvas (örnek: 1800x1200)
     const targetW = 1800
@@ -483,9 +489,9 @@ function PhotoPageContent() {
     const ctx = offscreen.getContext("2d")
     if (!ctx) return
 
-    // Kaynağı contain + center çiz (letterbox)
-    const srcW = src.width
-    const srcH = src.height
+    // Video boyutlarını al
+    const srcW = video.videoWidth || 1280
+    const srcH = video.videoHeight || 720
     if (!srcW || !srcH) return
 
     const scale = Math.min(targetW / srcW, targetH / srcH)
@@ -497,7 +503,7 @@ function PhotoPageContent() {
     // Arka planı şeffaf/boş bırakmak yerine beyaz yapalım (baskı için daha güvenli)
     ctx.fillStyle = "#ffffff"
     ctx.fillRect(0, 0, targetW, targetH)
-    ctx.drawImage(src, dx, dy, drawW, drawH)
+    ctx.drawImage(video, dx, dy, drawW, drawH)
 
     const img = offscreen.toDataURL("image/jpeg", 0.95)
 
@@ -917,12 +923,13 @@ function PhotoPageContent() {
                   autoPlay
                   muted
                   playsInline
-                  className="hidden"
-                />
-                <canvas
-                  ref={previewCanvasRef}
                   className="w-full h-full object-cover"
                 />
+                {/* Arka plan kaldırma canvas'ı comment'e alındı */}
+                {/* <canvas
+                  ref={previewCanvasRef}
+                  className="w-full h-full object-cover"
+                /> */}
                 {isCountingDown && countdown && (
                   <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30">
                     <div className="countdown-display bg-orange-500/90 backdrop-blur-md text-white rounded-full w-32 h-32 flex items-center justify-center border-4 border-white/50 shadow-2xl">

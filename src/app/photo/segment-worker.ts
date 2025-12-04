@@ -15,7 +15,7 @@ let personIdx = 1
 let fgCanvas: OffscreenCanvas | null = null
 let fgCtx: OffscreenCanvasRenderingContext2D | null = null
 
-// ---- BG yönetimi (detached hatasına karşı sağlam) ----
+// ---- BG yön@etimi (detached hatasına karşı sağlam) ----
 let bgUrl: string | null = null
 let bgBitmap: ImageBitmap | null = null
 const bgCache = new Map<string, ImageBitmap>() // LRU için ekleme sırası
@@ -217,21 +217,12 @@ self.onmessage = async (e: MessageEvent) => {
       const wasmBaseUrl: string = data.wasmBaseUrl
       const vision = await FilesetResolver.forVisionTasks(wasmBaseUrl)
 
-      try {
-        segmenter = await ImageSegmenter.createFromOptions(vision, {
-          baseOptions: { modelAssetPath: modelUrl, delegate: "GPU" },
-          runningMode: "VIDEO",
-          outputCategoryMask: true,
-          outputConfidenceMasks: true,
-        })
-      } catch {
-        segmenter = await ImageSegmenter.createFromOptions(vision, {
-          baseOptions: { modelAssetPath: modelUrl, delegate: "CPU" },
-          runningMode: "VIDEO",
-          outputCategoryMask: true,
-          outputConfidenceMasks: true,
-        })
-      }
+      segmenter = await ImageSegmenter.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: modelUrl, delegate: "CPU" },
+        runningMode: "VIDEO",
+        outputCategoryMask: true,
+        outputConfidenceMasks: true,
+      })
 
       labels = (segmenter as any).getLabels?.() ?? []
       personIdx = pickPersonIndex(labels)

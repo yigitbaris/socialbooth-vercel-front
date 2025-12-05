@@ -895,7 +895,7 @@
   dependencies:
     "@huggingface/jinja" "^0.4.1"
     onnxruntime-node "1.21.0"
-    onnxruntime-web "1.22.0-dev.20250409-89f8206ba4"
+    onnxruntime-web "1.21.0"
     sharp "^0.34.1"
 
 "@humanfs/core@^0.19.1":
@@ -4653,6 +4653,18 @@ onnxruntime-node@1.21.0:
     global-agent "^3.0.0"
     onnxruntime-common "1.21.0"
     tar "^7.0.1"
+
+onnxruntime-web@1.21.0:
+  version "1.21.0"
+  resolved "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.21.0.tgz"
+  integrity sha512-bGctB4H+IZ+q3xZU3uZhEgJL+1xhvbwGfXMoTtH5qy8fR2gJWI1UjmGrpqP3QPfSYFmWXUZM9WxFz+5Zq6L8Uw==
+  dependencies:
+    flatbuffers "^25.1.24"
+    guid-typescript "^1.0.9"
+    long "^5.2.3"
+    onnxruntime-common "1.21.0"
+    platform "^1.3.6"
+    protobufjs "^7.2.4"
 
 onnxruntime-web@1.22.0-dev.20250409-89f8206ba4:
   version "1.22.0-dev.20250409-89f8206ba4"

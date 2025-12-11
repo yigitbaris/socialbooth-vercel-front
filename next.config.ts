@@ -1,36 +1,123 @@
-// import type { NextConfig } from "next";
-
-// const nextConfig: NextConfig = {
-//   /* config options here */
-// };
-
-// export default nextConfig;
-
-// ----------------------------------------
-// next-pwa sonrası config
-
-/* eski withPWA
-
+// next.config.js - PWA enabled with runtime caching
 const withPWA = require("next-pwa")({
   dest: "public",
   register: true,
   skipWaiting: true,
-  disable: process.env.NODE_ENV === "development",
-})
-
-module.exports = withPWA({
-  // diğer next.js config ayarları
-})
-*/
-
-// next.config.js
-const withPWA = require("next-pwa")({
-  dest: "public",
-  register: false,
-  skipWaiting: true,
-  // Offline kuyruğunu yerelde test edeceksen false yap:
-  // disable: false,
-  disable: process.env.NODE_ENV === "development",
+  // Enable PWA in all environments for offline testing
+  disable: false,
+  // Runtime caching configuration
+  runtimeCaching: [
+    // Cache static assets
+    {
+      urlPattern: /^https?.*\.(png|jpg|jpeg|webp|svg|gif|ico|woff|woff2)$/,
+      handler: "CacheFirst",
+      options: {
+        cacheName: "static-assets",
+        expiration: {
+          maxEntries: 200,
+          maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+        },
+      },
+    },
+    // Cache Next.js static files
+    {
+      urlPattern: /^\/_next\/static\/.*/i,
+      handler: "CacheFirst",
+      options: {
+        cacheName: "next-static",
+        expiration: {
+          maxEntries: 100,
+          maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
+        },
+      },
+    },
+    // Cache fonts
+    {
+      urlPattern: /^https?:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
+      handler: "CacheFirst",
+      options: {
+        cacheName: "google-fonts",
+        expiration: {
+          maxEntries: 20,
+          maxAgeSeconds: 60 * 60 * 24 * 365,
+        },
+      },
+    },
+    // Cache flag images
+    {
+      urlPattern: /^https:\/\/flagcdn\.com\/.*/i,
+      handler: "CacheFirst",
+      options: {
+        cacheName: "flag-images",
+        expiration: {
+          maxEntries: 20,
+          maxAgeSeconds: 60 * 60 * 24 * 30,
+        },
+      },
+    },
+    // Network first for API calls (will fallback to app's offline handler)
+    {
+      urlPattern: /\/api\/v1\/.*/i,
+      handler: "NetworkFirst",
+      options: {
+        cacheName: "api-cache",
+        networkTimeoutSeconds: 5,
+        expiration: {
+          maxEntries: 50,
+          maxAgeSeconds: 60 * 60, // 1 hour
+        },
+      },
+    },
+    // Cache backgrounds and filters from local public folder
+    {
+      urlPattern: /^\/(backgrounds|filters)\/.*/i,
+      handler: "CacheFirst",
+      options: {
+        cacheName: "media-assets",
+        expiration: {
+          maxEntries: 100,
+          maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
+        },
+      },
+    },
+    // Cache mediapipe models
+    {
+      urlPattern: /^\/mediapipe\/.*/i,
+      handler: "CacheFirst",
+      options: {
+        cacheName: "mediapipe-models",
+        expiration: {
+          maxEntries: 10,
+          maxAgeSeconds: 60 * 60 * 24 * 30,
+        },
+      },
+    },
+    // Cache ML models
+    {
+      urlPattern: /^\/models\/.*/i,
+      handler: "CacheFirst",
+      options: {
+        cacheName: "ml-models",
+        expiration: {
+          maxEntries: 10,
+          maxAgeSeconds: 60 * 60 * 24 * 30,
+        },
+      },
+    },
+    // Default handler for other requests
+    {
+      urlPattern: /.*/i,
+      handler: "NetworkFirst",
+      options: {
+        cacheName: "others",
+        networkTimeoutSeconds: 10,
+        expiration: {
+          maxEntries: 32,
+          maxAgeSeconds: 60 * 60 * 24,
+        },
+      },
+    },
+  ],
 })
 
 const API_ORIGIN =
@@ -38,13 +125,11 @@ const API_ORIGIN =
 
 module.exports = withPWA({
   eslint: {
-    // Allow production builds to successfully complete even if there are ESLint errors.
     ignoreDuringBuilds: true,
   },
   async rewrites() {
     return [
       {
-        // Frontend’te /api/v1/... → Backend 3001’e gider
         source: "/api/v1/:path*",
         destination: `${API_ORIGIN}/api/v1/:path*`,
       },

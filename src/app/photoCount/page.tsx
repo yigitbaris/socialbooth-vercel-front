@@ -37,9 +37,6 @@ function PhotoCountPageContent() {
     { count: 1, price: 0 },
     { count: 2, price: 0 },
     { count: 3, price: 0 },
-    { count: 4, price: 0 },
-    { count: 5, price: 0 },
-    { count: 6, price: 0 },
   ])
 
   useEffect(() => {
@@ -61,7 +58,7 @@ function PhotoCountPageContent() {
           // } else if (lang === "de" || lang === "fr") {
           //   basePrice = current?.priceEUR ?? basePrice
           // }
-          const counts = [1, 2, 3, 4, 5, 6]
+          const counts = [1, 2, 3]
           // price = count × category.price
           const computed = counts.map((cnt) => ({
             count: cnt,
@@ -152,8 +149,9 @@ function PhotoCountPageContent() {
           }
         } catch {}
 
+        const sourceOrderId = params.get("sourceOrderId") || ""
         router.push(
-          `/payment?orderId=${orderId}&photoCount=${count}&cur=${cur}&fx=${fx}`
+          `/payment?orderId=${orderId}&photoCount=${count}&cur=${cur}&fx=${fx}&sourceOrderId=${sourceOrderId}`
         )
       } else {
         toast.error(response.data.msg)
@@ -219,17 +217,16 @@ function PhotoCountPageContent() {
           <p className="mt-2 text-2xl">{translations[lang].selectPrompt}</p>
         </div>
 
-        {/* Horizontal scroll of cards */}
-        <div className="flex flex-1 h-full space-x-6 overflow-x-auto p-4">
+        {/* Grid of cards */}
+        <div className="grid grid-cols-3 gap-6 w-full flex-1 p-4">
           {options.map(({ count, price }) => (
             <button
               key={count}
               onClick={() => handleSelect(count)}
               className="
-                flex-shrink-0
+                w-full h-full
                 bg-white/40 backdrop-blur-md
                 rounded-2xl p-6
-                min-w-[25%]
                 flex flex-col items-center justify-center
                 hover:scale-105 transition-transform
               "

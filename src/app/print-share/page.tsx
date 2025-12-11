@@ -3,7 +3,7 @@
 
 import React, { useEffect, useRef, useState, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import api from "../utils/api"
+import api, { baseUrl } from "../utils/api"
 import { translations } from "../utils/translations"
 import { useGlobalContext } from "../context/GlobalContext"
 import Lottie from "lottie-react"
@@ -154,8 +154,8 @@ function PrintSharePageContent() {
               url: url,
             }))
             setPhotos(photoData)
-            // Clear localStorage after using
-            localStorage.removeItem("capturedPhotos")
+            // DON'T clear localStorage - keep for copy print flow
+            // Will be cleared when returning to home page or timer expires
             console.log(
               "Successfully loaded photos from localStorage:",
               photoData.length
@@ -170,10 +170,14 @@ function PrintSharePageContent() {
       }
 
       // Fallback to API if no localStorage photos or localStorage photos are empty
-      if (orderId) {
-        console.log("No localStorage photos found, fetching from API...")
+      // If there is a sourceOrderId, use that to load photos (because this is a copy print)
+      const sourceOrderId = searchParams.get("sourceOrderId")
+      const targetOrderId = sourceOrderId || orderId
+
+      if (targetOrderId) {
+        console.log("Fetching photos from API for order:", targetOrderId)
         try {
-          const response = await api.get(`/orders/getOrder/${orderId}`)
+          const response = await api.get(`/orders/getOrder/${targetOrderId}`)
           if (response.data.success && response.data.data.products) {
             // ✅ Fotoğrafları ürünler içinden çekiyoruz
             const photoData = response.data.data.products.map(
@@ -199,7 +203,7 @@ function PrintSharePageContent() {
     }
 
     loadPhotos()
-  }, [orderId])
+  }, [orderId, searchParams])
 
   const handleEmail = () => {
     router.push("/exit")
@@ -207,8 +211,48 @@ function PrintSharePageContent() {
   const handleSMS = () => {
     router.push("/exit")
   }
-  const handlePrint = () => {
-    router.push("/payment")
+  // Fetch order details to get boothId and categoryId for re-ordering
+  const [currentOrder, setCurrentOrder] = useState<any>(null)
+  
+  useEffect(() => {
+    if(!orderId) return
+    const fetchOrderDetails = async () => {
+      try {
+        const res = await api.get(`/orders/getOrder/${orderId}`)
+        if(res.data.success) {
+          setCurrentOrder(res.data.data)
+        }
+      } catch(e) {
+        console.error("Order fetch error:", e)
+      }
+    }
+    fetchOrderDetails()
+  }, [orderId])
+
+  const handlePrint = async () => {
+    if (!currentOrder) return
+
+    // 1. Create new order
+    try {
+      const response = await api.post("/orders/newOrder", {
+        boothId: currentOrder.boothId._id || currentOrder.boothId, 
+        categoryId: currentOrder.categoryId._id || currentOrder.categoryId,
+        language: currentOrder.language,
+      })
+
+      if (response.data.success) {
+        const newOrder = response.data.data
+        // 2. Redirect to PhotoCount with sourceOrderId
+        // sourceOrderId tells the next pages where to get the ORIGINAL photos from
+        const sourceOrderId = searchParams.get("sourceOrderId") || orderId
+        
+        router.push(
+          `/photoCount?category=${currentOrder.categoryId.name}&categoryId=${currentOrder.categoryId._id}&orderId=${newOrder._id}&sourceOrderId=${sourceOrderId}`
+        )
+      }
+    } catch (error) {
+       console.error("Copy Print error:", error)
+    }
   }
 
   // choose 1-col if only 1 photo, else 2-col
@@ -225,6 +269,9 @@ function PrintSharePageContent() {
 
   useEffect(() => {
     if (remaining <= 0) {
+      // Clear localStorage when timeout occurs
+      localStorage.removeItem("capturedPhotos")
+      localStorage.removeItem("printCount")
       router.push("/")
     }
   }, [remaining, router])
@@ -298,7 +345,7 @@ function PrintSharePageContent() {
               {photos.map(({ id, url }, i) => {
                 const src = url.startsWith("data:")
                   ? url
-                  : `http://booth-api.cloud.solucharger.com${url}`
+                  : `${baseUrl}${url}`
                 return (
                   <FramedPhoto key={id} src={src} alt={`Fotoğraf ${i + 1}`} />
                 )
@@ -342,7 +389,7 @@ function PrintSharePageContent() {
               </button>
             </div>
 
-            {/* Extra copy print button */}
+            {/* Extra copy print button 
             {photos.length > 0 && (
               <button
                 onClick={() =>
@@ -360,6 +407,7 @@ function PrintSharePageContent() {
                   : "Kopya Baskı Al"}
               </button>
             )}
+                  */}
           </div>
         </div>
       )}

@@ -25,8 +25,6 @@ function PhotoPageContent() {
   const offscreenDoneRef = useRef(false)
   const workerReadyRef = useRef(false)
   const pumpingRef = useRef(false)
-  const workerBusyRef = useRef(false)
-  const lastFrameTimeRef = useRef(0)
 
   const params = useSearchParams()
   const photoCount = parseInt(params.get("photoCount") ?? "1")
@@ -45,6 +43,14 @@ function PhotoPageContent() {
   const [photoFilters, setPhotoFilters] = useState<(string | null)[]>([])
   const [selectedFilter, setSelectedFilter] = useState<string | null>(null)
 
+  // Text state persistence (JSON for Fabric)
+  const [textStates, setTextStates] = useState<(any | null)[]>([])
+
+  // --- Sağ panel modu: menü / efekt (filtre) / sticker / text
+  const [mode, setMode] = useState<"menu" | "effect" | "sticker" | "text">(
+    "menu"
+  )
+
   // background selection states
   const [isBackgroundSelected, setIsBackgroundSelected] = useState(false)
   const [showBackgroundConfirmModal, setShowBackgroundConfirmModal] =
@@ -52,6 +58,15 @@ function PhotoPageContent() {
   const [pendingBackgroundSelection, setPendingBackgroundSelection] = useState<
     string | null
   >(null)
+
+  // Warning state for disabled style buttons
+  const [showStyleDisabledWarning, setShowStyleDisabledWarning] =
+    useState(false)
+  const warningTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Warning state for start shooting without background
+  const [showStartShootingWarning, setShowStartShootingWarning] = useState(false)
+  const startShootingWarningTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // background removal state
   const [isProcessing, setIsProcessing] = useState(false)
@@ -81,6 +96,30 @@ function PhotoPageContent() {
 
   // Info tooltip state
   const [showInfoTooltip, setShowInfoTooltip] = useState(false)
+
+  // Preview Scale State for Text Mode
+  const [previewScale, setPreviewScale] = useState(1)
+  const previewContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    // Only observe if in text mode and container exists
+    const el = previewContainerRef.current
+    if (!el) return
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        if (width === 0 || height === 0) continue
+        // 360x240 base size (3:2 ratio)
+        // Allow scaling > 1 to fill the space
+        const s = Math.min(width / 360, height / 240)
+        setPreviewScale(s)
+      }
+    })
+    
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [mode, selectedIdx]) // Re-run when mode changes to ensure ref is captured if it mounts/unmounts
 
   // category name from order
   const [categoryName, setCategoryName] = useState<string | null>(null)
@@ -264,22 +303,16 @@ function PhotoPageContent() {
     if (remaining <= 0) router.push("/")
   }, [remaining, router])
 
-  // Kamera + canlı önizleme (arka plan seçilince)
+  // Kamera + canlı önizleme (arka plan seçilince veya seçilmeyince)
   useEffect(() => {
-    if (selectedIdx === null && isBackgroundSelected) {
+    if (selectedIdx === null) {
       let stream: MediaStream | null = null
       let cancelled = false
+      let animationFrameId: number | null = null
 
       ;(async () => {
         try {
-          // Kamera constraint'leri: 1280x720 @ 30fps
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              width: { ideal: 1280, max: 1280 },
-              height: { ideal: 720, max: 720 },
-              frameRate: { ideal: 30, max: 30 },
-            },
-          })
+          stream = await navigator.mediaDevices.getUserMedia({ video: true })
           if (!videoRef.current) return
           videoRef.current.srcObject = stream
           videoRef.current.muted = true
@@ -287,100 +320,126 @@ function PhotoPageContent() {
 
           if (cancelled) return
 
-          if (!offscreenDoneRef.current && previewCanvasRef.current) {
-            // Preview canvas 3:2 oranında (4x6) - 1800x1200
-            const targetW = 1800
-            const targetH = 1200 // 3:2 = 4x6 oranı
-            previewCanvasRef.current.width = targetW
-            previewCanvasRef.current.height = targetH
-            const offscreen =
-              previewCanvasRef.current.transferControlToOffscreen()
-            offscreenDoneRef.current = true
+          // Eğer bir arka plan seçiliyse -> Worker ile segmentasyon
+          // Eğer selectedBg null ise (veya henüz seçilmediyse) -> Raw video çizimi
+          const shouldUseWorker = selectedBg !== null
 
-            workerRef.current = new Worker(
-              new URL("./segment-worker.ts", import.meta.url),
-              { type: "module" }
-            )
+          if (shouldUseWorker) {
+            // --- WORKER START ---
+             if (!offscreenDoneRef.current && previewCanvasRef.current) {
+              const v = videoRef.current!
+              const canvasW = v.videoWidth || 1920
+              const canvasH = v.videoHeight || 1080
+              previewCanvasRef.current.width = canvasW
+              previewCanvasRef.current.height = canvasH
+              
+              // Canvas'ı offscreen'e transfer et
+              const offscreen = previewCanvasRef.current.transferControlToOffscreen()
+              offscreenDoneRef.current = true
 
-            workerRef.current.onmessage = (ev: MessageEvent) => {
-              const { type } = ev.data || {}
-              if (type === "ready") {
-                workerReadyRef.current = true
-                if (selectedBg) {
-                  workerRef.current?.postMessage({
-                    type: "setBackground",
-                    url: selectedBg,
+              workerRef.current = new Worker(
+                new URL("./segment-worker.ts", import.meta.url),
+                { type: "module" }
+              )
+
+              workerRef.current.onmessage = (ev: MessageEvent) => {
+                const { type } = ev.data || {}
+                if (type === "ready") {
+                  workerReadyRef.current = true
+                  if (selectedBg) {
+                    workerRef.current?.postMessage({
+                      type: "setBackground",
+                      url: selectedBg,
+                    })
+                  }
+                  pump()
+                }
+              }
+
+              const modelUrl = new URL(
+                "/models/selfie_segmenter_landscape.tflite",
+                location.origin
+              ).toString()
+              const wasmBaseUrl = new URL(
+                "/mediapipe/wasm/",
+                location.origin
+              ).toString()
+
+              workerRef.current.postMessage(
+                { type: "init", canvas: offscreen, modelUrl, wasmBaseUrl },
+                [offscreen]
+              )
+            } else if (workerRef.current) {
+               // Zaten worker varsa, sadece pump tetikle
+               pump()
+               // Eğer worker var ve selectedBg değiştiyse güncelle
+               if (selectedBg) {
+                  workerRef.current.postMessage({
+                      type: "setBackground",
+                      url: selectedBg,
                   })
-                }
-                pump()
-              } else if (type === "idle") {
-                // Worker işlemi bitirdi, yeni frame gönderebiliriz
-                workerBusyRef.current = false
-              }
+               }
             }
 
-            const modelUrl = new URL(
-              "/models/selfie_segmenter_landscape.tflite",
-              location.origin
-            ).toString()
-            const wasmBaseUrl = new URL(
-              "/mediapipe/wasm/",
-              location.origin
-            ).toString()
+            async function pump() {
+              if (cancelled || pumpingRef.current) return
+              pumpingRef.current = true
 
-            workerRef.current.postMessage(
-              { type: "init", canvas: offscreen, modelUrl, wasmBaseUrl },
-              [offscreen]
-            )
-          } else {
-            pump()
-          }
-
-          async function pump() {
-            if (cancelled || pumpingRef.current) return
-            pumpingRef.current = true
-            lastFrameTimeRef.current = 0
-
-            const v = videoRef.current!
-            const loop = async (now: number) => {
-              if (cancelled || !workerReadyRef.current) return
-
-              // FPS throttling: 30 FPS = ~33ms per frame
-              const elapsed = now - lastFrameTimeRef.current
-              if (elapsed < 33 || workerBusyRef.current) {
+              const v = videoRef.current!
+              const loop = async () => {
+                if (cancelled) return
+                // Worker'a frame gönder
+                if (v.readyState >= 2) {
+                   const frame = await createImageBitmap(v)
+                   workerRef.current?.postMessage({ type: "frame", frame }, [frame])
+                }
+                
                 if ("requestVideoFrameCallback" in v) {
-                  ;(v as any).requestVideoFrameCallback(loop)
+                  (v as any).requestVideoFrameCallback(loop)
                 } else {
-                  setTimeout(() => loop(performance.now()), 16)
+                  setTimeout(loop, 16)
                 }
-                return
               }
-
-              lastFrameTimeRef.current = now
-              workerBusyRef.current = true
-
-              try {
-                const frame = await createImageBitmap(v)
-                workerRef.current?.postMessage({ type: "frame", frame }, [
-                  frame,
-                ])
-              } catch (err) {
-                console.error("Frame creation error:", err)
-                workerBusyRef.current = false
-              }
-
-              // Worker idle mesajı geldiğinde workerBusyRef.current = false olacak
-              if ("requestVideoFrameCallback" in v) {
-                ;(v as any).requestVideoFrameCallback(loop)
-              } else {
-                setTimeout(() => loop(performance.now()), 16)
-              }
+              loop()
             }
-            if ("requestVideoFrameCallback" in v) {
-              ;(v as any).requestVideoFrameCallback(loop)
-            } else {
-              loop(performance.now())
-            }
+            // --- WORKER END ---
+
+          } else {
+             // --- RAW VIDEO MODE START ---
+             // Eğer daha önce worker kurulduysa temizle (fakat offscreen transfer edildiyse geri alamayız,
+             // bu yüzden offscreenDoneRef=true ise basitçe o canvası kullanamayız, yeni canvas gerekir mi?
+             // Offscreen transfer edilen canvas DOM'da "detached" olmaz, ama main thread'den drawImage yapamayız.
+             // ÇÖZÜM: `key` prop kullanarak Canvas'ı remount etmek en temizi. 
+             // Ancak bu useEffect içinde. Biz `key` prop'u `isBackgroundSelected` veya `selectedBg` değişimine bağlarsak
+             // JSX tarafında component unmount/remount olur ve yeni ref gelir. 
+             // Şimdilik JSX tarafında bu key değişimini yapalım, burada sadece raw çizim mantığı kalsın.
+             
+             // NOT: JSX'te canvas key={selectedBg ? "worker" : "raw"} gibi bir şey yaparsak ref sıfırlanır.
+             // Biz burada ref'in taze olduğunu varsayalım.
+             
+             if (previewCanvasRef.current) {
+                // Eğer offscreen'e transfer edildiyse buraya düşmemesi lazım (JSX re-mount edecek)
+                const ctx = previewCanvasRef.current.getContext("2d")
+                if (ctx) {
+                   const loop = () => {
+                      if (cancelled) return
+                      if (videoRef.current && videoRef.current.readyState >= 2) {
+                         const v = videoRef.current
+                         previewCanvasRef.current!.width = v.videoWidth
+                         previewCanvasRef.current!.height = v.videoHeight
+                         // Aynalama için save/scale
+                         ctx.save()
+                         ctx.translate(v.videoWidth, 0)
+                         ctx.scale(-1, 1)
+                         ctx.drawImage(v, 0, 0)
+                         ctx.restore()
+                      }
+                      animationFrameId = requestAnimationFrame(loop)
+                   }
+                   loop()
+                }
+             }
+             // --- RAW VIDEO MODE END ---
           }
         } catch (e) {
           console.error(e)
@@ -390,12 +449,16 @@ function PhotoPageContent() {
       return () => {
         cancelled = true
         pumpingRef.current = false
+        if (animationFrameId) cancelAnimationFrame(animationFrameId)
+
+        // Worker temizliği
         workerReadyRef.current = false
-        workerBusyRef.current = false
-        lastFrameTimeRef.current = 0
-        workerRef.current?.terminate()
-        workerRef.current = null
-        offscreenDoneRef.current = false
+        if (workerRef.current) {
+           workerRef.current.terminate()
+           workerRef.current = null
+        }
+        offscreenDoneRef.current = false // Canvas yeniden oluşacaksa bu da sıfırlanmalı
+
         if (videoRef.current?.srcObject) {
           ;(videoRef.current.srcObject as MediaStream)
             .getTracks()
@@ -403,6 +466,7 @@ function PhotoPageContent() {
         }
       }
     } else {
+      // Fotoğraf çekildi, kamera dursun
       workerRef.current?.terminate()
       workerRef.current = null
       offscreenDoneRef.current = false
@@ -412,7 +476,7 @@ function PhotoPageContent() {
           .forEach((t) => t.stop())
       }
     }
-  }, [selectedIdx, isBackgroundSelected, selectedBg])
+  }, [selectedIdx, selectedBg]) // isBackgroundSelected bağımlılığını kaldırdık, selectedBg önemli
 
   // Deklanşör sesi
   useEffect(() => {
@@ -494,9 +558,9 @@ function PhotoPageContent() {
     const dx = (targetW - drawW) / 2
     const dy = (targetH - drawH) / 2
 
-    // Arka planı şeffaf/boş bırakmak yerine beyaz yapalım (baskı için daha güvenli)
-    ctx.fillStyle = "#ffffff"
-    ctx.fillRect(0, 0, targetW, targetH)
+    // Arka planı şeffaf/boş bırakmak yerine beyaz yapmıyoruz, artık ne varsa o (raw ise raw, bg ise bg)
+    // ctx.fillStyle = "#ffffff"
+    // ctx.fillRect(0, 0, targetW, targetH)
     ctx.drawImage(src, dx, dy, drawW, drawH)
 
     const img = offscreen.toDataURL("image/jpeg", 0.95)
@@ -507,6 +571,7 @@ function PhotoPageContent() {
     setPhotos((p) => [...p, img])
     setPhotoBackgrounds((p) => [...p, selectedBg])
     setPhotoFilters((p) => [...p, null]) // başlangıçta filtre yok
+    setTextStates((p) => [...p, null]) // başlangıçta text yok
     setSelectedIdx(newPhotoIndex)
   }
 
@@ -605,23 +670,54 @@ function PhotoPageContent() {
   }
 
   // Updated capture trigger
-  const capture = () => startCountdown()
+  const capture = () => {
+    // Check if background is selected
+    if (!isBackgroundSelected) {
+      setShowStartShootingWarning(true)
+      if (startShootingWarningTimeoutRef.current) {
+        clearTimeout(startShootingWarningTimeoutRef.current)
+      }
+      startShootingWarningTimeoutRef.current = setTimeout(() => {
+        setShowStartShootingWarning(false)
+      }, 3000)
+      return
+    }
+    startCountdown()
+  }
 
   // Retake current photo (aynı arkaplan)
   const retakePhoto = () => {
     if (selectedIdx === null || retakeCount >= maxRetakes) return
+
+    // Clean up text mode if active
+    if (fabricCanvasRef.current) {
+      fabricCanvasRef.current.dispose()
+      fabricCanvasRef.current = null
+    }
+    setHasTextOnCanvas(false)
+    setMode("menu")
+
     setPhotos((p) => p.filter((_, i) => i !== selectedIdx))
     setOriginalPhotos((p) => p.filter((_, i) => i !== selectedIdx))
     setPhotoBackgrounds((p) => p.filter((_, i) => i !== selectedIdx))
     setPhotoFilters((p) => p.filter((_, i) => i !== selectedIdx))
+    setTextStates((p) => p.filter((_, i) => i !== selectedIdx))
     setSelectedIdx(null)
     setSelectedFilter(null)
     setRetakeCount((prev) => prev + 1)
     setIsBackgroundSelected(true)
   }
 
+  // Helper: Reconstruct background (Original + Filter) without text
+  const getCleanImage = async (idx: number): Promise<string> => {
+    const base = originalPhotos[idx]
+    const filter = photoFilters[idx]
+    if (!filter) return base
+    return await composeWithOverlay(base, filter)
+  }
+
   // Text overlay (fabric)
-  const initializeFabricCanvas = () => {
+  const initializeFabricCanvas = async () => {
     if (!fabricContainerRef.current || selectedIdx === null) return
     if (fabricCanvasRef.current) {
       fabricCanvasRef.current.dispose()
@@ -629,39 +725,110 @@ function PhotoPageContent() {
     setHasTextOnCanvas(false)
 
     const canvas = new fabric.Canvas("text-canvas", {
-      width: 350,
-      height: 350,
+      width: 360,
+      height: 240,
       backgroundColor: "transparent",
       preserveObjectStacking: true,
     })
 
-    fabric.Image.fromURL(photos[selectedIdx]).then((img) => {
-      const scaleX = 350 / img.width!
-      const scaleY = 350 / img.height!
-      const scale = Math.min(scaleX, scaleY)
-      img.scale(scale)
-
-      const scaledWidth = img.width! * scale
-      const scaledHeight = img.height! * scale
-      img.set({
-        left: (350 - scaledWidth) / 2,
-        top: (350 - scaledHeight) / 2,
-        selectable: false,
-        evented: false,
-      })
-
-      canvas.backgroundImage = img
-      canvas.renderAll()
-    })
-
     fabricCanvasRef.current = canvas
+
+    // Event listeners for bidirectional binding
+    const updateSelection = () => {
+      const activeObj = canvas.getActiveObject()
+      if (activeObj && activeObj.type === "text") {
+        const textObj = activeObj as fabric.Text
+        if (textObj.text) setTextInput(textObj.text)
+        if (textObj.fill) setTextColor(textObj.fill as string)
+        if (textObj.fontSize) setFontSize(textObj.fontSize)
+        if (textObj.fontFamily) setFontFamily(textObj.fontFamily)
+        if (typeof textObj.fontWeight === "string")
+          setIsBold(textObj.fontWeight === "bold")
+        if (textObj.fontStyle) setIsItalic(textObj.fontStyle === "italic")
+        if (textObj.underline !== undefined) setIsUnderline(textObj.underline)
+      }
+    }
+
+    canvas.on("selection:created", updateSelection)
+    canvas.on("selection:updated", updateSelection)
+
+    // Load Clean Image as Background
+    const bgUrl = await getCleanImage(selectedIdx)
+
+    const setCanvasBackground = (url: string) => {
+      fabric.Image.fromURL(url).then((img) => {
+        const scaleX = 360 / img.width!
+        const scaleY = 240 / img.height!
+        const scale = Math.min(scaleX, scaleY)
+        img.scale(scale)
+
+        const scaledWidth = img.width! * scale
+        const scaledHeight = img.height! * scale
+        img.set({
+          left: (360 - scaledWidth) / 2,
+          top: (240 - scaledHeight) / 2,
+          selectable: false,
+          evented: false,
+        })
+
+        canvas.backgroundImage = img
+        canvas.renderAll()
+      })
+    }
+
+    // Restore Text State if exists
+    const savedState = textStates[selectedIdx]
+    if (savedState) {
+      canvas.loadFromJSON(savedState, () => {
+        setCanvasBackground(bgUrl)
+        const objects = canvas.getObjects().filter((o) => o.type === "text")
+        setHasTextOnCanvas(objects.length > 0)
+      })
+    } else {
+      setCanvasBackground(bgUrl)
+    }
   }
+
+  // --- Live Update Helpers ---
+  // Call these when input states change to update the ACTIVE object
+  const updateActiveObject = (updates: Partial<fabric.Text>) => {
+    if (!fabricCanvasRef.current) return
+    const activeObj = fabricCanvasRef.current.getActiveObject() as fabric.Text
+    if (activeObj && activeObj.type === "text") {
+      activeObj.set(updates)
+      fabricCanvasRef.current.requestRenderAll()
+    }
+  }
+
+  // Effects to sync State -> Canvas Active Object
+  useEffect(() => {
+    updateActiveObject({ text: textInput })
+  }, [textInput])
+
+  useEffect(() => {
+    updateActiveObject({ fill: textColor })
+  }, [textColor])
+  useEffect(() => {
+    updateActiveObject({ fontSize: fontSize })
+  }, [fontSize])
+  useEffect(() => {
+    updateActiveObject({ fontFamily: fontFamily })
+  }, [fontFamily])
+  useEffect(() => {
+    updateActiveObject({ fontWeight: isBold ? "bold" : "normal" })
+  }, [isBold])
+  useEffect(() => {
+    updateActiveObject({ fontStyle: isItalic ? "italic" : "normal" })
+  }, [isItalic])
+  useEffect(() => {
+    updateActiveObject({ underline: isUnderline })
+  }, [isUnderline])
 
   const addTextToImage = () => {
     if (!fabricCanvasRef.current || !textInput.trim()) return
     const text = new fabric.Text(textInput, {
-      left: 175,
-      top: 175,
+      left: 180,
+      top: 120,
       fontFamily: fontFamily,
       fontSize: fontSize,
       fill: textColor,
@@ -674,8 +841,9 @@ function PhotoPageContent() {
     })
     fabricCanvasRef.current.add(text)
     fabricCanvasRef.current.setActiveObject(text)
-    setTextInput("")
+    // setTextInput("") // Don't clear, keep it for editing
     setHasTextOnCanvas(true)
+    fabricCanvasRef.current.renderAll()
   }
 
   const removeSelectedText = () => {
@@ -692,23 +860,51 @@ function PhotoPageContent() {
 
   const saveTextOverlay = () => {
     if (!fabricCanvasRef.current || selectedIdx === null) return
-    const dataUrl = fabricCanvasRef.current.toDataURL({
-      multiplier: 1,
-      format: "jpeg",
-      quality: 1,
+
+    // 1. Save Fabric State (JSON) for re-editing
+    const json = fabricCanvasRef.current.toJSON()
+    // Remove background image from JSON to avoid conflicts/bloat
+    delete json.backgroundImage
+    delete json.background
+
+    setTextStates((prev) => {
+      const copy = [...prev]
+      copy[selectedIdx] = json
+      return copy
     })
+
+    // 2. Bake image for preview/printing
+    // We need to bake text ON TOP OF the clean/filtered image (which is already set as canvas.backgroundImage)
+    
+    // Calculate multiplier to restore original resolution (e.g. 1800x1200) from small canvas (360x240)
+    let multiplier = 1
+    const bg = fabricCanvasRef.current.backgroundImage
+    if (bg && bg instanceof fabric.Image && bg.width) {
+       // bg.width is the original width of the image
+       // canvas.width is 360
+       multiplier = bg.width / (fabricCanvasRef.current.width || 360)
+    } else {
+       // Fallback: 1800 / 360 = 5
+       multiplier = 5
+    }
+
+    const dataUrl = fabricCanvasRef.current.toDataURL({
+      multiplier: multiplier,
+      format: "jpeg",
+      quality: 0.95,
+    })
+
     setPhotos((prev) =>
       prev.map((photo, idx) => (idx === selectedIdx ? dataUrl : photo))
     )
+
     fabricCanvasRef.current.dispose()
     fabricCanvasRef.current = null
+    // Don't reset hasTextOnCanvas instantly or logic might break if reused, but here we exit mode so it's fine.
     setHasTextOnCanvas(false)
   }
 
-  // --- Sağ panel modu: menü / efekt (filtre) / sticker / text
-  const [mode, setMode] = useState<"menu" | "effect" | "sticker" | "text">(
-    "menu"
-  )
+
 
   type OverlayFilter = { id: string; name: string; src: string | null }
   const [overlayFilters, setOverlayFilters] = useState<OverlayFilter[]>([
@@ -787,7 +983,7 @@ function PhotoPageContent() {
   }, [mode, selectedIdx])
 
   return (
-    <div className="relative min-h-screen bg-gradient-to-br from-orange-500 to-orange-300 flex py-3 px-24">
+    <div className="relative min-h-screen bg-gradient-to-br from-orange-500 to-orange-300 flex py-3 px-4 md:px-12 lg:pl-24">
       {/* Back button */}
       <button
         onClick={() => router.push("/")}
@@ -817,7 +1013,7 @@ function PhotoPageContent() {
       </div>
 
       {/* SOL: Arkaplan paneli */}
-      <div className="w-1/3 h-[95vh] bg-white/30 backdrop-blur-md rounded-2xl p-4 flex flex-col">
+      <div className="w-[30%] h-[95vh] bg-white/30 backdrop-blur-md rounded-2xl p-4 flex flex-col">
         <h2 className="text-white font-semibold mb-6 text-3xl">
           {translations[lang].backgroundsTitle}
         </h2>
@@ -853,7 +1049,7 @@ function PhotoPageContent() {
               onClick={() => handleBackgroundSelect(null)}
               className={`w-full aspect-square flex bg-white/40 rounded-lg overflow-hidden transition border-2 relative
                 ${
-                  selectedBg === null
+                  selectedBg === null && isBackgroundSelected
                     ? "border-orange-500 ring-2 ring-orange-300"
                     : "border-transparent"
                 }
@@ -866,7 +1062,7 @@ function PhotoPageContent() {
               <span className="text-gray-800 text-center flex-1 flex items-center justify-center">
                 {translations[lang].noBackground}
               </span>
-              {selectedBg === null && (
+              {selectedBg === null && isBackgroundSelected && (
                 <div className="absolute top-2 right-2 bg-orange-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
                   ✓
                 </div>
@@ -907,10 +1103,10 @@ function PhotoPageContent() {
       </div>
 
       {/* ORTA: Kamera / Fotoğraf */}
-      <div className="flex-1 mx-4 flex flex-col items-center space-y-4">
+      <div className="flex-1 mx-4 mt-20 flex flex-col items-center space-y-4">
         <div className="w-full max-w-4xl aspect-[3/2] bg-gray-200/30 backdrop-blur-md rounded-2xl overflow-hidden relative">
           {selectedIdx === null ? (
-            isBackgroundSelected ? (
+            // isBackgroundSelected kontrolünü kaldırıyoruz, her zaman gösteriyoruz
               <>
                 <video
                   ref={videoRef}
@@ -919,34 +1115,29 @@ function PhotoPageContent() {
                   playsInline
                   className="hidden"
                 />
+                {/* 
+                   Canvas'ı yeniden oluşturmak (remount) için key veriyoruz.
+                   selectedBg!==null ise (worker mode) -> key="segmented"
+                   selectedBg===null ise (raw mode)    -> key="raw"
+                   Böylece worker için offscreen transfer edilmiş canvas ile, 
+                   raw çizim için normal canvas birbirine karışmaz.
+                */}
                 <canvas
+                  key={selectedBg !== null ? "segmented" : "raw"}
                   ref={previewCanvasRef}
                   className="w-full h-full object-cover"
                 />
                 {isCountingDown && countdown && (
-                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30">
-                    <div className="countdown-display bg-orange-500/90 backdrop-blur-md text-white rounded-full w-32 h-32 flex items-center justify-center border-4 border-white/50 shadow-2xl">
-                      <span className="text-6xl font-bold font-mono">
+                  <div className="absolute top-4 right-4 z-30">
+                    <div className="countdown-display bg-black/20 backdrop-blur-xl text-white rounded-full w-20 h-20 flex items-center justify-center border-2 border-white/30 shadow-2xl">
+                      <span className="text-4xl font-bold font-mono">
                         {countdown}
                       </span>
                     </div>
                   </div>
                 )}
               </>
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="text-center">
-                  <div className="text-6xl mb-4">🖼️</div>
-                  <p className="text-white text-4xl font-bold mb-2 px-16 text-center">
-                    {(categoryName ? categoryName + " " : "") +
-                      translations[lang].selectBackgroundFirst}{" "}
-                  </p>
-                  <p className="text-white/80 text-xl">
-                    {translations[lang].selectFromPanel}
-                  </p>
-                </div>
-              </div>
-            )
+            
           ) : (
             <>
               <img
@@ -993,18 +1184,40 @@ function PhotoPageContent() {
 
         <div className="flex flex-col items-center gap-4 w-full">
           {/* Action Buttons */}
-          <div className="flex gap-4 flex-wrap justify-center">
+          <div className="flex gap-4 flex-wrap justify-center relative">
+            {showStartShootingWarning && (
+                <div className="absolute bottom-full mb-4 left-1/2 transform -translate-x-1/2 w-80 bg-black/80 backdrop-blur-md text-white text-center p-4 rounded-xl shadow-2xl border border-white/20 z-50 animate-fade-in-out">
+                  <div className="flex items-center justify-center gap-2 mb-1">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-6 w-6 text-orange-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                      />
+                    </svg>
+                    <span className="font-bold text-lg">Uyarı</span>
+                  </div>
+                  <p className="text-sm font-medium">
+                    {translations[lang].startShootingWarning}
+                  </p>
+                </div>
+            )}
             {selectedIdx === null ? (
               <button
                 onClick={capture}
                 disabled={
-                  !isBackgroundSelected ||
                   photos.length >= 1 ||
                   isProcessing ||
                   isCountingDown
                 }
-                className={`px-6 py-4 text-2xl font-semibold rounded-full shadow transition ${
-                  !isBackgroundSelected ||
+                className={`px-6 py-4 text-2xl font-semibold rounded-full shadow transition ${isCountingDown ? "hidden" : ""} ${
                   photos.length >= 1 ||
                   isProcessing ||
                   isCountingDown
@@ -1012,11 +1225,8 @@ function PhotoPageContent() {
                     : "bg-white text-orange-600 hover:scale-105"
                 }`}
               >
-                {!isBackgroundSelected
-                  ? (categoryName ? categoryName + " " : "") +
-                    translations[lang].selectBackgroundFirst
-                  : isCountingDown
-                  ? `${translations[lang].getReady} ${countdown}`
+                {isCountingDown
+                  ? ""
                   : isProcessing
                   ? translations[lang].processing
                   : photos.length >= 1
@@ -1089,7 +1299,7 @@ function PhotoPageContent() {
               <div
                 key={idx}
                 onClick={() => setSelectedIdx(idx)}
-                className={`w-24 h-24 rounded-lg overflow-hidden cursor-pointer transition ${
+                className={`flex-shrink-0 w-16 h-16 md:w-20 md:h-20 lg:w-24 lg:h-24 rounded-lg overflow-hidden cursor-pointer transition ${
                   selectedIdx === idx ? "ring-4 ring-orange-500" : ""
                 }`}
               >
@@ -1101,31 +1311,87 @@ function PhotoPageContent() {
       </div>
 
       {/* SAĞ: Düzenleme paneli */}
-      <div className="w-1/3 h-[95vh] bg-white/30 backdrop-blur-md rounded-2xl p-4 flex flex-col">
+      <div className="w-1/4 h-[95vh] bg-white/30 backdrop-blur-md rounded-2xl p-4 flex flex-col">
         {/* Menü */}
         {mode === "menu" && (
           <>
             <h2 className="text-white text-3xl font-semibold mb-6">
               {translations[lang].decorateTitle}
             </h2>
-            <button
-              onClick={() => setMode("effect")}
-              className="w-[80%] self-center py-6 mb-6 bg-white text-orange-600 rounded-full shadow hover:scale-105 transition text-2xl font-semibold"
-            >
-              {translations[lang].effectTab /* Efekt = PNG filtre */}
-            </button>
-            <button
-              onClick={() => setMode("sticker")}
-              className="w-[80%] self-center py-6 mb-6 bg-white text-orange-600 rounded-full shadow hover:scale-105 transition text-2xl font-semibold"
-            >
-              {translations[lang].stickerTab}
-            </button>
-            <button
-              onClick={() => setMode("text")}
-              className="w-[80%] self-center py-6 mb-6 bg-white text-orange-600 rounded-full shadow hover:scale-105 transition text-2xl font-semibold"
-            >
-              {translations[lang].textTab}
-            </button>
+
+            <div className="flex flex-col gap-6 relative">
+              {[
+                {
+                  id: "effect",
+                  label: translations[lang].effectTab,
+                  onClick: () => setMode("effect"),
+                },
+                {
+                  id: "sticker",
+                  label: translations[lang].stickerTab,
+                  onClick: () => setMode("sticker"),
+                },
+                {
+                  id: "text",
+                  label: translations[lang].textTab,
+                  onClick: () => setMode("text"),
+                },
+              ].map((btn) => {
+                const isDisabled = photos.length === 0
+                return (
+                  <button
+                    key={btn.id}
+                    onClick={() => {
+                      if (isDisabled) {
+                        setShowStyleDisabledWarning(true)
+                        if (warningTimeoutRef.current) {
+                          clearTimeout(warningTimeoutRef.current)
+                        }
+                        warningTimeoutRef.current = setTimeout(() => {
+                          setShowStyleDisabledWarning(false)
+                        }, 4000)
+                      } else {
+                        btn.onClick()
+                      }
+                    }}
+                    className={`w-[80%] self-center py-6 bg-white text-orange-600 rounded-full shadow transition text-2xl font-semibold relative
+                      ${
+                        isDisabled
+                          ? "blur-sm opacity-60 cursor-not-allowed"
+                          : "hover:scale-105"
+                      }`}
+                  >
+                    {btn.label}
+                  </button>
+                )
+              })}
+
+              {/* Warning Message Overlay */}
+              {showStyleDisabledWarning && (
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-[90%] mt-4 bg-black/80 backdrop-blur-md text-white text-center p-4 rounded-xl shadow-2xl border border-white/20 z-50 animate-fade-in-out">
+                  <div className="flex items-center justify-center gap-2 mb-1">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-6 w-6 text-orange-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                      />
+                    </svg>
+                    <span className="font-bold text-lg">Uyarı</span>
+                  </div>
+                  <p className="text-sm font-medium">
+                    {translations[lang].selectPhotoToStyle}
+                  </p>
+                </div>
+              )}
+            </div>
           </>
         )}
 
@@ -1278,262 +1544,273 @@ function PhotoPageContent() {
 
         {/* Metin */}
         {mode === "text" && (
-          <div className="relative h-[80vh] flex flex-col">
-            <div className="flex justify-between items-center mb-1">
-              <h2 className="text-white text-2xl font-bold">
-                {translations[lang].addTextTitle}
-              </h2>
-              <div className="flex gap-3 items-center">
-                {selectedIdx !== null && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        if (fabricCanvasRef.current) {
-                          fabricCanvasRef.current.dispose()
-                          fabricCanvasRef.current = null
-                        }
-                        setMode("menu")
-                      }}
-                      className="flex-1 py-3 px-4 bg-gradient-to-r from-red-500 to-orange-600 text-white rounded-xl font-bold hover:from-red-600 hover:to-orange-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
-                    >
-                      ↩️ {translations[lang].cancelText}
-                    </button>
-                    <button
-                      onClick={() => {
-                        saveTextOverlay()
-                        setMode("menu")
-                      }}
-                      disabled={!hasTextOnCanvas}
-                      className={`py-2 px-3 rounded-lg font-medium transition-all duration-200 shadow-lg text-sm ${
-                        hasTextOnCanvas
-                          ? "bg-gradient-to-r from-orange-500 to-orange-400 text-white hover:from-orange-600 hover:to-orange-400 hover:scale-105"
-                          : "bg-gray-400/50 text-gray-300 cursor-not-allowed"
-                      }`}
-                    >
-                      💾 {translations[lang].saveText}
-                    </button>
-                  </div>
-                )}
-                <button
-                  onClick={() => setMode("menu")}
-                  className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full hover:bg-white/30 transition-all duration-200 cursor-pointer shadow-lg flex items-center justify-center flex-shrink-0"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-6 w-6 text-white"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+          <div className="relative h-full flex flex-col overflow-hidden">
+            <div className="flex-none">
+              <div className="flex justify-between items-center mb-1">
+                <h2 className="text-white text-2xl font-bold">
+                  {translations[lang].addTextTitle}
+                </h2>
+                <div className="flex gap-3 items-center">
+                  {selectedIdx !== null && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          if (fabricCanvasRef.current) {
+                            fabricCanvasRef.current.dispose()
+                            fabricCanvasRef.current = null
+                          }
+                          setMode("menu")
+                        }}
+                        className="flex-1 py-3 px-4 bg-gradient-to-r from-red-500 to-orange-600 text-white rounded-xl font-bold hover:from-red-600 hover:to-orange-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
+                      >
+                        ↩️ {translations[lang].cancelText}
+                      </button>
+                      <button
+                        onClick={() => {
+                          saveTextOverlay()
+                          setMode("menu")
+                        }}
+                        disabled={!hasTextOnCanvas}
+                        className={`py-2 px-3 rounded-lg font-medium transition-all duration-200 shadow-lg text-sm ${
+                          hasTextOnCanvas
+                            ? "bg-gradient-to-r from-orange-500 to-orange-400 text-white hover:from-orange-600 hover:to-orange-400 hover:scale-105"
+                            : "bg-gray-400/50 text-gray-300 cursor-not-allowed"
+                        }`}
+                      >
+                        💾 {translations[lang].saveText}
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setMode("menu")}
+                    className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full hover:bg-white/30 transition-all duration-200 cursor-pointer shadow-lg flex items-center justify-center flex-shrink-0"
                   >
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            {selectedIdx !== null ? (
-              <>
-                <div className="mb-3 mt-4">
-                  <input
-                    type="text"
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    placeholder={translations[lang].typeAwesome}
-                    className="w-full bg-gradient-to-r from-white/30 to-white/20 backdrop-blur-md rounded-xl p-4 text-gray-800 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-white/50 border border-white/20 shadow-lg"
-                  />
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-6 w-6 text-white"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
                 </div>
+              </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-3">
-                  <div className="bg-white/20 backdrop-blur-md rounded-xl p-4 border border-white/20">
-                    <label className="text-white text-md font-semibold block mb-2">
-                      {translations[lang].sizeLabel}{" "}
-                      <span className="text-orange-500">({fontSize}px)</span>
-                    </label>
+              {selectedIdx !== null && (
+                <>
+                  <div className="mb-3 mt-4">
                     <input
-                      type="range"
-                      min="12"
-                      max="72"
-                      value={fontSize}
-                      onChange={(e) => setFontSize(parseInt(e.target.value))}
-                      className="w-full h-2 bg-white/80 rounded-lg appearance-none cursor-pointer slider"
+                      type="text"
+                      value={textInput}
+                      onChange={(e) => setTextInput(e.target.value)}
+                      placeholder={translations[lang].typeAwesome}
+                      className="w-full bg-gradient-to-r from-white/30 to-white/20 backdrop-blur-md rounded-xl p-4 text-gray-800 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-white/50 border border-white/20 shadow-lg"
                     />
                   </div>
 
-                  <div className=" bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 ">
-                    <div className="relative">
-                      <div className="flex justify-center mb-3">
-                        <div
-                          className="w-12 h-12 rounded-full border-4 border-white/50 shadow-lg"
-                          style={{ backgroundColor: textColor }}
-                        ></div>
-                      </div>
+                  <div className="grid grid-cols-2 gap-4 mb-3">
+                    <div className="bg-white/20 backdrop-blur-md rounded-xl p-4 border border-white/20">
+                      <label className="text-white text-md font-semibold block mb-2">
+                        {translations[lang].sizeLabel}{" "}
+                        <span className="text-orange-500">({fontSize}px)</span>
+                      </label>
                       <input
-                        type="color"
-                        value={textColor}
-                        onChange={(e) => setTextColor(e.target.value)}
-                        className="w-full h-8 rounded-xl border-2 border-orange-300/50 cursor-pointer opacity-0 absolute inset-0"
+                        type="range"
+                        min="12"
+                        max="72"
+                        value={fontSize}
+                        onChange={(e) => setFontSize(parseInt(e.target.value))}
+                        className="w-full h-2 bg-white/80 rounded-lg appearance-none cursor-pointer slider"
                       />
-                      <button
-                        onClick={() =>
-                          (
-                            document.querySelector(
-                              'input[type="color"]'
-                            ) as HTMLInputElement
-                          )?.click()
-                        }
-                        className="w-full py-2 bg-gradient-to-r from-orange-400/50 to-orange-400/50 backdrop-blur-sm rounded-xl border border-orange-300/40 text-white font-medium hover:from-orange-400/50 hover:to-orange-400/50 transition-all duration-200 hover:cursor-pointer"
-                      >
-                        {translations[lang].chooseColor}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mb-4 mt-2">
-                  <div className="bg-white/20 backdrop-blur-md  rounded-2xl p-4 border border-orange-300/25 ">
-                    <div className="flex gap-5 mb-4 px-2">
-                      <button
-                        onClick={() => setFontStyleView("font")}
-                        className={`flex-1 py-2 px-4 rounded-xl font-semibold text-sm transition-all duration-200 ${
-                          fontStyleView === "font"
-                            ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white shadow-lg transform scale-105"
-                            : "bg-white/70 text-gray-600/80 hover:bg-white/30"
-                        }`}
-                      >
-                        {translations[lang].fontTab}
-                      </button>
-                      <button
-                        onClick={() => setFontStyleView("style")}
-                        className={`flex-1 py-2 px-4 rounded-xl font-semibold text-sm transition-all duration-200 ${
-                          fontStyleView === "style"
-                            ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white shadow-lg transform scale-105"
-                            : "bg-white/70 text-gray-600/80 hover:bg-white/30"
-                        }`}
-                      >
-                        {translations[lang].styleTab}
-                      </button>
                     </div>
 
-                    {fontStyleView === "font" ? (
-                      <div>
-                        <select
-                          value={fontFamily}
-                          onChange={(e) => setFontFamily(e.target.value)}
-                          className="w-full bg-gradient-to-r from-orange-500/40 to-orange-500/30 backdrop-blur-md rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-400/50 border border-orange-300/30 shadow-lg font-medium"
-                        >
-                          <option
-                            value="Arial"
-                            className="text-gray-800 bg-white"
-                          >
-                            Arial
-                          </option>
-                          <option
-                            value="Times New Roman"
-                            className="text-gray-800 bg-white"
-                          >
-                            Times New Roman
-                          </option>
-                          <option
-                            value="Helvetica"
-                            className="text-gray-800 bg-white"
-                          >
-                            Helvetica
-                          </option>
-                          <option
-                            value="Georgia"
-                            className="text-gray-800 bg-white"
-                          >
-                            Georgia
-                          </option>
-                          <option
-                            value="Verdana"
-                            className="text-gray-800 bg-white"
-                          >
-                            Verdana
-                          </option>
-                        </select>
-                      </div>
-                    ) : (
-                      <div>
-                        <div className="grid grid-cols-3 gap-3">
-                          <button
-                            onClick={() => setIsBold(!isBold)}
-                            className={`py-3 px-2 rounded-xl font-bold text-sm transition-all duration-200 shadow-lg ${
-                              isBold
-                                ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white transform scale-105"
-                                : "bg-white/70 text-gray-600/80 hover:bg-white/30"
-                            }`}
-                          >
-                            <span className="font-bold">B</span>
-                            <div className="text-xs mt-1">
-                              {translations[lang].boldText}
-                            </div>
-                          </button>
-                          <button
-                            onClick={() => setIsItalic(!isItalic)}
-                            className={`py-3 px-2 rounded-xl font-bold text-sm transition-all duration-200 shadow-lg ${
-                              isItalic
-                                ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white transform scale-105"
-                                : "bg-white/70 text-gray-600/80 hover:bg-white/30"
-                            }`}
-                          >
-                            <span className="italic font-bold">I</span>
-                            <div className="text-xs mt-1">
-                              {translations[lang].italicText}
-                            </div>
-                          </button>
-                          <button
-                            onClick={() => setIsUnderline(!isUnderline)}
-                            className={`py-3 px-2 rounded-xl font-bold text-sm transition-all duration-200 shadow-lg ${
-                              isUnderline
-                                ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white transform scale-105"
-                                : "bg-white/70 text-gray-600/80 hover:bg-white/30"
-                            }`}
-                          >
-                            <span className="underline font-bold">U</span>
-                            <div className="text-xs mt-1">
-                              {translations[lang].underText}
-                            </div>
-                          </button>
+                    <div className=" bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 ">
+                      <div className="relative">
+                        <div className="flex justify-center mb-3">
+                          <div
+                            className="w-12 h-12 rounded-full border-4 border-white/50 shadow-lg"
+                            style={{ backgroundColor: textColor }}
+                          ></div>
                         </div>
+                        <input
+                          type="color"
+                          value={textColor}
+                          onChange={(e) => setTextColor(e.target.value)}
+                          className="w-full h-8 rounded-xl border-2 border-orange-300/50 cursor-pointer opacity-0 absolute inset-0"
+                        />
+                        <button
+                          onClick={() =>
+                            (
+                              document.querySelector(
+                                'input[type="color"]'
+                              ) as HTMLInputElement
+                            )?.click()
+                          }
+                          className="w-full py-2 bg-gradient-to-r from-orange-400/50 to-orange-400/50 backdrop-blur-sm rounded-xl border border-orange-300/40 text-white font-medium hover:from-orange-400/50 hover:to-orange-400/50 transition-all duration-200 hover:cursor-pointer"
+                        >
+                          {translations[lang].chooseColor}
+                        </button>
                       </div>
-                    )}
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex gap-3 ">
-                  <button
-                    onClick={addTextToImage}
-                    disabled={!textInput.trim()}
-                    className={`flex-1 py-3 px-4 rounded-xl font-bold text-white transition-all duration-200 shadow-lg ${
-                      textInput.trim()
-                        ? "bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 transform hover:scale-105"
-                        : "bg-gray-400/50 cursor-not-allowed"
-                    }`}
-                  >
-                    {translations[lang].addTextButton}
-                  </button>
-                  <button
-                    onClick={removeSelectedText}
-                    className="flex-1 py-3 px-4 bg-gradient-to-r from-red-500 to-orange-600 text-white rounded-xl font-bold hover:from-red-600 hover:to-orange-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
-                  >
-                    {translations[lang].removeTextButton}
-                  </button>
-                </div>
+                  <div className="mb-4 mt-2">
+                    <div className="bg-white/20 backdrop-blur-md  rounded-2xl p-4 border border-orange-300/25 ">
+                      <div className="flex gap-5 mb-4 px-2">
+                        <button
+                          onClick={() => setFontStyleView("font")}
+                          className={`flex-1 py-2 px-4 rounded-xl font-semibold text-sm transition-all duration-200 ${
+                            fontStyleView === "font"
+                              ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white shadow-lg transform scale-105"
+                              : "bg-white/70 text-gray-600/80 hover:bg-white/30"
+                          }`}
+                        >
+                          {translations[lang].fontTab}
+                        </button>
+                        <button
+                          onClick={() => setFontStyleView("style")}
+                          className={`flex-1 py-2 px-4 rounded-xl font-semibold text-sm transition-all duration-200 ${
+                            fontStyleView === "style"
+                              ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white shadow-lg transform scale-105"
+                              : "bg-white/70 text-gray-600/80 hover:bg-white/30"
+                          }`}
+                        >
+                          {translations[lang].styleTab}
+                        </button>
+                      </div>
 
-                <div className="flex-1 items-center justify-center flex ">
-                  <div
-                    ref={fabricContainerRef}
-                    className="w-[85%] h-[85%] bg-gradient-to-br from-white/20 to-white/10 backdrop-blur-md rounded-2xl border-2 border-white/30 shadow-2xl overflow-hidden flex items-center justify-center "
-                  >
-                    <canvas id="text-canvas" className="rounded-xl" />
+                      {fontStyleView === "font" ? (
+                        <div>
+                          <select
+                            value={fontFamily}
+                            onChange={(e) => setFontFamily(e.target.value)}
+                            className="w-full bg-gradient-to-r from-orange-500/40 to-orange-500/30 backdrop-blur-md rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-400/50 border border-orange-300/30 shadow-lg font-medium"
+                          >
+                            <option
+                              value="Arial"
+                              className="text-gray-800 bg-white"
+                            >
+                              Arial
+                            </option>
+                            <option
+                              value="Times New Roman"
+                              className="text-gray-800 bg-white"
+                            >
+                              Times New Roman
+                            </option>
+                            <option
+                              value="Helvetica"
+                              className="text-gray-800 bg-white"
+                            >
+                              Helvetica
+                            </option>
+                            <option
+                              value="Georgia"
+                              className="text-gray-800 bg-white"
+                            >
+                              Georgia
+                            </option>
+                            <option
+                              value="Verdana"
+                              className="text-gray-800 bg-white"
+                            >
+                              Verdana
+                            </option>
+                          </select>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="grid grid-cols-3 gap-3">
+                            <button
+                              onClick={() => setIsBold(!isBold)}
+                              className={`py-3 px-2 rounded-xl font-bold text-sm transition-all duration-200 shadow-lg ${
+                                isBold
+                                  ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white transform scale-105"
+                                  : "bg-white/70 text-gray-600/80 hover:bg-white/30"
+                              }`}
+                            >
+                              <span className="font-bold">B</span>
+                              <div className="text-xs mt-1">
+                                {translations[lang].boldText}
+                              </div>
+                            </button>
+                            <button
+                              onClick={() => setIsItalic(!isItalic)}
+                              className={`py-3 px-2 rounded-xl font-bold text-sm transition-all duration-200 shadow-lg ${
+                                isItalic
+                                  ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white transform scale-105"
+                                  : "bg-white/70 text-gray-600/80 hover:bg-white/30"
+                              }`}
+                            >
+                              <span className="italic font-bold">I</span>
+                              <div className="text-xs mt-1">
+                                {translations[lang].italicText}
+                              </div>
+                            </button>
+                            <button
+                              onClick={() => setIsUnderline(!isUnderline)}
+                              className={`py-3 px-2 rounded-xl font-bold text-sm transition-all duration-200 shadow-lg ${
+                                isUnderline
+                                  ? "bg-gradient-to-r from-orange-500 to-orange-500 text-white transform scale-105"
+                                  : "bg-white/70 text-gray-600/80 hover:bg-white/30"
+                              }`}
+                            >
+                              <span className="underline font-bold">U</span>
+                              <div className="text-xs mt-1">
+                                {translations[lang].underText}
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
+
+                  <div className="flex gap-3 ">
+                    <button
+                      onClick={addTextToImage}
+                      disabled={!textInput.trim()}
+                      className={`flex-1 py-3 px-4 rounded-xl font-bold text-white transition-all duration-200 shadow-lg ${
+                        textInput.trim()
+                          ? "bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 transform hover:scale-105"
+                          : "bg-gray-400/50 cursor-not-allowed"
+                      }`}
+                    >
+                      {translations[lang].addTextButton}
+                    </button>
+                    <button
+                      onClick={removeSelectedText}
+                      className="flex-1 py-3 px-4 bg-gradient-to-r from-red-500 to-orange-600 text-white rounded-xl font-bold hover:from-red-600 hover:to-orange-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
+                    >
+                      {translations[lang].removeTextButton}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {selectedIdx !== null ? (
+              <div className="flex-1 min-h-0 flex items-center justify-center mt-3 relative">
+                 <div ref={previewContainerRef} className=" w-full h-full flex items-center justify-center">
+                    <div
+                      ref={fabricContainerRef}
+                      style={{ 
+                        transform: `scale(${previewScale})`,
+                        width: 360,
+                        height: 240
+                      }}
+                      className="origin-center bg-gradient-to-br from-white/20 to-white/10 backdrop-blur-md rounded-2xl border-2 border-white/30 shadow-2xl overflow-hidden flex items-center justify-center shrink-0"
+                    >
+                      <canvas id="text-canvas" className="rounded-xl" />
+                    </div>
                 </div>
-              </>
+              </div>
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20">

@@ -11,7 +11,38 @@ import { getTranslatedName } from "./utils/text"
 
 // moved to utils/text.ts and imported above
 
-//new branch commit
+// Types for Booth Config
+type BoothActivity = {
+  key: string
+  active: boolean
+  label: string
+  category: Category | null
+}
+
+type BoothConfigResponse = {
+  success: boolean
+  booth: {
+    id: number
+    name: string
+    isAct1: boolean
+    isAct2: boolean
+    isAct3: boolean
+    isAct4: boolean
+    isAct5: boolean
+    isCash: boolean
+    isCreditCard: boolean
+    isQrcode: boolean
+    isActive: boolean
+    isPrinterActive: boolean
+  }
+  activities: BoothActivity[]
+  payments: {
+    cash: boolean
+    creditCard: boolean
+    qrcode: boolean
+  }
+}
+
 
 function PhotoLauncherPageContent() {
   const router = useRouter()
@@ -25,11 +56,12 @@ function PhotoLauncherPageContent() {
     { code: "es", name: "Español", flag: "https://flagcdn.com/es.svg" },
   ]
   // Para birimi geçici olarak sadece TRY kullanılacak
-  const currencies = [
-    { code: "try", symbol: "₺", label: "TRY" },
-    // { code: "usd", symbol: "$", label: "USD" },
-    // { code: "eur", symbol: "€", label: "EUR" },
-  ]
+  // Para birimi geçici olarak sadece TRY kullanılacak
+  // const currencies = [
+  //   { code: "try", symbol: "₺", label: "TRY" },
+  //   // { code: "usd", symbol: "$", label: "USD" },
+  //   // { code: "eur", symbol: "€", label: "EUR" },
+  // ]
 
   // // your categories + extra options
   // const options = [
@@ -71,9 +103,12 @@ function PhotoLauncherPageContent() {
   //   },
   // ]
 
-  const [cur, setCur] = useState(currencies[0].code)
-  const [categories, setCategories] = useState<Category[]>([]) // ürün kategorileri
-  const [isLoadingCategories, setIsLoadingCategories] = useState<boolean>(true)
+  // const [cur, setCur] = useState(currencies[0].code)
+  
+  // New State for Booth Config
+  const [boothConfig, setBoothConfig] = useState<BoothConfigResponse | null>(null)
+  const [isLoadingConfig, setIsLoadingConfig] = useState<boolean>(true)
+  
   const [selected, setSelected] = useState<Category | null>(null)
   const [showKVKK, setShowKVKK] = useState(false)
   const [remaining, setRemaining] = useState(60)
@@ -140,43 +175,28 @@ function PhotoLauncherPageContent() {
   }
 
   useEffect(() => {
-    const getAllCategories = async () => {
+    const fetchConfig = async () => {
       try {
-        setIsLoadingCategories(true)
-        api
-          .get(`/categories/getAllCategories`)
-          .then((res) => {
-            if (res.data.success) setCategories(res.data.data)
-          })
-          .finally(() => setIsLoadingCategories(false))
+        setIsLoadingConfig(true)
+        const res = await api.get("/booth/config")
+        if (res.data.success) {
+            setBoothConfig(res.data)
+        }
       } catch (error) {
-        console.error("Kategoriler alınamadı:", error)
-        toast.error("Bir hata oluştu.")
-        setIsLoadingCategories(false)
+        console.error("Booth config alınamadı:", error)
+        toast.error("Konfigürasyon yüklenemedi.")
+      } finally {
+        setIsLoadingConfig(false)
       }
     }
-    getAllCategories()
-  }, [lang])
-  // component içinde
+
+    fetchConfig()
+  }, [])
+
+  // Clear photo storage when returning to home (start of new session)
   useEffect(() => {
-    const fetch = () => {
-      setIsLoadingCategories(true)
-      api
-        .get("/categories/getAllCategories")
-        .then((res) => {
-          if (res.data.success) setCategories(res.data.data)
-        })
-        .catch(() => {
-          /* silent */
-        })
-        .finally(() => setIsLoadingCategories(false))
-    }
-
-    fetch() // ilk deneme
-
-    const onOnline = () => fetch()
-    window.addEventListener("online", onOnline)
-    return () => window.removeEventListener("online", onOnline)
+    localStorage.removeItem("capturedPhotos")
+    localStorage.removeItem("printCount")
   }, [])
 
   return (
@@ -220,9 +240,9 @@ function PhotoLauncherPageContent() {
 
       {/* — Category Carousel */}
       <div className="w-[90%] flex-1 flex items-center justify-center overflow-x-auto   ">
-        <div className="flex min-w-[85%]  space-x-6 py-4 px-6 mx-auto lg:mx-0 ">
-          {isLoadingCategories
-            ? Array.from({ length: 5 }).map((_, idx) => (
+        <div className="flex min-w-[85%] justify-center space-x-6 py-4 px-6 mx-auto">
+          {isLoadingConfig
+            ? Array.from({ length: 3 }).map((_, idx) => (
                 <div
                   key={`skeleton-${idx}`}
                   className="flex-shrink-0 w-64 bg-white/20 backdrop-blur-md rounded-2xl p-6 min-h-[45vh] animate-pulse"
@@ -234,37 +254,45 @@ function PhotoLauncherPageContent() {
                   <div className="h-6 w-24 bg-white/30 rounded" />
                 </div>
               ))
-            : categories.map((opt) => {
-                const displayName = getTranslatedName(opt.name, lang)
+            : boothConfig?.activities
+                .filter((act) => act.active && act.category)
+                .map((act) => {
+                  const opt = act.category!
+                  // Use the label from Booth Config if desired, or the one from Category object.
+                  // User requested "Büyüle Selfie" etc. based on flags. The implementation in Node maps these labels.
+                  // However, the Category Object also has `name` (which might be an object {tr:..., en:...}).
+                  // Let's use `getTranslatedName(opt.name)` as before to support multi-lang, 
+                  // but we are filtering by the Admin Flag.
+                  const displayName = getTranslatedName(opt.name, lang)
 
-                return (
-                  <button
-                    key={opt._id}
-                    onClick={() => handleClick(opt)}
-                    className="flex-shrink-0 w-64  bg-white/30 backdrop-blur-md rounded-2xl p-6 hover:scale-105 transition-transform flex flex-col items-center justify-center min-h-[45vh]"
-                  >
-                    <div className="p-10 bg-white/50 rounded-lg flex items-center justify-center mb-4">
-                      <img
-                        src={"/icons/camera.png"}
-                        // alt={displayName}
-                        className="w-20 h-20"
-                      />
-                    </div>
-                    <span className="text-3xl font-semibold text-white mb-1">
-                      {displayName}
-                    </span>
-                    {(() => {
-                      const symbol = "₺"
-                      const value: number = opt.price
-                      return (
-                        <span className="text-2xl text-white">
-                          {symbol} {value}
-                        </span>
-                      )
-                    })()}
-                  </button>
-                )
-              })}
+                  return (
+                    <button
+                      key={act.key} // use act.key (isAct1 etc) or opt._id
+                      onClick={() => handleClick(opt)}
+                      className="flex-shrink-0 w-64  bg-white/30 backdrop-blur-md rounded-2xl p-6 hover:scale-105 transition-transform flex flex-col items-center justify-center min-h-[45vh]"
+                    >
+                      <div className="p-10 bg-white/50 rounded-lg flex items-center justify-center mb-4">
+                        <img
+                          src={"/icons/camera.png"}
+                          alt={displayName}
+                          className="w-20 h-20"
+                        />
+                      </div>
+                      <span className="text-3xl font-semibold text-white mb-1">
+                        {displayName}
+                      </span>
+                      {(() => {
+                        const symbol = "₺"
+                        const value: number = opt.price
+                        return (
+                          <span className="text-2xl text-white">
+                            {symbol} {value}
+                          </span>
+                        )
+                      })()}
+                    </button>
+                  )
+                })}
         </div>
       </div>
       {/* — KVKK Modal (tabsız sürüm) */}

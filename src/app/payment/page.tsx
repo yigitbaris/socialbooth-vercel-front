@@ -139,7 +139,7 @@ function PaymentPageContent() {
       }
     } catch (err: any) {
       console.error("applyPromo error:", err)
-      toast.error("Kupon uygulanırken hata oluştu")
+      toast.error("Geçersiz kupon kodu")
     }
   }
 
@@ -150,15 +150,17 @@ function PaymentPageContent() {
       return
     }
 
+    const sourceOrderId = params.get("sourceOrderId") || ""
+
     // Kredi kartı için önce kredi kartı sayfasına yönlendir
     if (method === "creditCard") {
       router.push(
-        `/payment/creditCard?orderId=${orderId}&photoCount=${photoCount}&cur=${cur}&fx=${fx}`
+        `/payment/creditCard?orderId=${orderId}&photoCount=${photoCount}&cur=${cur}&fx=${fx}&sourceOrderId=${sourceOrderId}`
       )
     } else {
       // Nakit ödeme için direkt sayfaya yönlendir
       router.push(
-        `/payment/${method}?orderId=${orderId}&photoCount=${photoCount}&cur=${cur}&fx=${fx}`
+        `/payment/${method}?orderId=${orderId}&photoCount=${photoCount}&cur=${cur}&fx=${fx}&sourceOrderId=${sourceOrderId}`
       )
     }
   }

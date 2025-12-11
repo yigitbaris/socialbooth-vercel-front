@@ -31,7 +31,7 @@ const PROCESS_WIDTH = 640
 const PROCESS_HEIGHT = 426 // 3:2 = 4x6 oranı (640/426 ≈ 1.502)
 
 // Mask kenarı yumuşatma (feather/blur radius)
-const FEATHER_RADIUS = 12 // 8-16px aralığında
+// const FEATHER_RADIUS = 12 // unused
 
 // Frame skip için busy flag
 let isProcessingFrame = false
@@ -48,74 +48,7 @@ function ensureFgCanvasSize(w: number, h: number) {
   }
 }
 
-// Mask kenarına feather/blur uygula
-async function applyFeatherToMask(
-  maskBitmap: ImageBitmap,
-  radius: number
-): Promise<ImageBitmap | null> {
-  try {
-    const tmp = new OffscreenCanvas(maskBitmap.width, maskBitmap.height)
-    const tctx = tmp.getContext("2d")!
-    tctx.drawImage(maskBitmap, 0, 0)
 
-    // Gaussian blur için canvas filter kullan (eğer destekleniyorsa)
-    // Fallback: basit alpha kanalı manipülasyonu
-    const imageData = tctx.getImageData(
-      0,
-      0,
-      maskBitmap.width,
-      maskBitmap.height
-    )
-    const data = imageData.data
-
-    // Basit blur: alpha kanalını yumuşat
-    // Her piksel için çevresindeki piksellerin ortalamasını al
-    const blurred = new Uint8ClampedArray(data.length)
-    const r = Math.max(1, Math.floor(radius))
-
-    for (let y = 0; y < maskBitmap.height; y++) {
-      for (let x = 0; x < maskBitmap.width; x++) {
-        let sum = 0
-        let count = 0
-
-        for (let dy = -r; dy <= r; dy++) {
-          for (let dx = -r; dx <= r; dx++) {
-            const nx = x + dx
-            const ny = y + dy
-            if (
-              nx >= 0 &&
-              nx < maskBitmap.width &&
-              ny >= 0 &&
-              ny < maskBitmap.height
-            ) {
-              const idx = (ny * maskBitmap.width + nx) * 4 + 3
-              sum += data[idx]
-              count++
-            }
-          }
-        }
-
-        const idx = (y * maskBitmap.width + x) * 4
-        blurred[idx] = data[idx] // R
-        blurred[idx + 1] = data[idx + 1] // G
-        blurred[idx + 2] = data[idx + 2] // B
-        blurred[idx + 3] = Math.round(sum / count) // A (yumuşatılmış)
-      }
-    }
-
-    const blurredImageData = new ImageData(
-      blurred,
-      maskBitmap.width,
-      maskBitmap.height
-    )
-    tctx.putImageData(blurredImageData, 0, 0)
-
-    return await createImageBitmap(tmp)
-  } catch (e) {
-    console.warn("Feather apply failed, returning original", e)
-    return maskBitmap
-  }
-}
 
 async function confidenceMaskToBitmap(
   m: any,
@@ -300,7 +233,7 @@ self.onmessage = async (e: MessageEvent) => {
         baseOptions: { modelAssetPath: modelUrl, delegate: "CPU" },
         runningMode: "VIDEO",
         outputCategoryMask: true,
-        outputConfidenceMasks: false, // Kapatıldı: daha düşük performans için
+        outputConfidenceMasks: true, // Açıldı: daha yumuşak kenarlar için gerekli
       })
 
       labels = (segmenter as any).getLabels?.() ?? []
@@ -344,7 +277,13 @@ self.onmessage = async (e: MessageEvent) => {
       // Segmentasyon için düşük çözünürlüklü işleme (3:2 oranında)
       const processCanvas = new OffscreenCanvas(PROCESS_WIDTH, PROCESS_HEIGHT)
       const processCtx = processCanvas.getContext("2d")!
+      
+      // MIRRORING for Segmentation Input
+      processCtx.save()
+      processCtx.translate(PROCESS_WIDTH, 0)
+      processCtx.scale(-1, 1)
       processCtx.drawImage(frame, 0, 0, PROCESS_WIDTH, PROCESS_HEIGHT)
+      processCtx.restore()
 
       // Segmentation işlemi için küçük canvas'ı ImageBitmap'e çevir
       const processBitmap = await createImageBitmap(processCanvas)
@@ -355,7 +294,13 @@ self.onmessage = async (e: MessageEvent) => {
       // Foreground: frame'i canvas boyutuna çiz
       fgCtx!.globalCompositeOperation = "source-over"
       fgCtx!.clearRect(0, 0, canvas.width, canvas.height)
+      
+      // MIRRORING for Display Foreground
+      fgCtx!.save()
+      fgCtx!.translate(canvas.width, 0)
+      fgCtx!.scale(-1, 1)
       fgCtx!.drawImage(frame, 0, 0, canvas.width, canvas.height)
+      fgCtx!.restore()
 
       // Mask'i al ve canvas boyutuna scale et
       let maskBitmap: ImageBitmap | null = null
@@ -376,20 +321,9 @@ self.onmessage = async (e: MessageEvent) => {
         scaledMaskCtx.drawImage(maskBitmap, 0, 0, canvas.width, canvas.height)
         maskBitmap.close()
 
-        // Feather/blur uygula (kenar yumuşatma)
-        const featheredMaskBitmap = await createImageBitmap(scaledMask)
-        const featheredMask = await applyFeatherToMask(
-          featheredMaskBitmap,
-          FEATHER_RADIUS
-        )
-        featheredMaskBitmap.close()
-
-        if (featheredMask) {
-          // Mask'i foreground'a uygula
-          fgCtx!.globalCompositeOperation = "destination-in"
-          fgCtx!.drawImage(featheredMask, 0, 0, canvas.width, canvas.height)
-          featheredMask.close()
-        }
+        // Mask'i foreground'a uygula (Confidence mask zaten yumuşak kenarlı)
+        fgCtx!.globalCompositeOperation = "destination-in"
+        fgCtx!.drawImage(scaledMask, 0, 0)
       }
       fgCtx!.globalCompositeOperation = "source-over"
 

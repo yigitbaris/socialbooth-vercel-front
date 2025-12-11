@@ -176,18 +176,19 @@ function CardPaymentPageContent() {
           })
 
           // Kategori adına göre yönlendirme
-          const isPhonePrint =
+          const sourceOrderId = params.get("sourceOrderId")
+
+          if (sourceOrderId) {
+            // Copy Print flow: Return to PrintAndShare with original photo source
+            console.log("🔄 Redirecting to PrintAndShare for copy print flow")
+            router.push(
+              `/print-share?orderId=${orderId}&sourceOrderId=${sourceOrderId}`
+            )
+          } else if (
             categoryName.toLowerCase().includes("telefondan") ||
             categoryName.toLowerCase().includes("phone") ||
             categoryName.toLowerCase().includes("baskı")
-
-          console.log("🎯 Navigation decision:", {
-            categoryName,
-            isPhonePrint,
-            willRedirectTo: isPhonePrint ? "phoneToPrint" : "photo",
-          })
-
-          if (isPhonePrint) {
+          ) {
             console.log("📱 Redirecting to phoneToPrint page")
             router.push(
               `/photo/phoneToPrint?orderId=${orderId}&photoCount=${photoCount}`

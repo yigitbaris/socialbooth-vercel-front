@@ -135,6 +135,8 @@ export type TranslationKeys =
   | "remainingTime"
   | "backToMenu"
   | "retakeInfoTooltip"
+  | "selectPhotoToStyle"
+  | "startShootingWarning" // New key
 
 // Çeviri objesi
 export const translations: Record<Locale, Record<TranslationKeys, string>> = {
@@ -280,7 +282,10 @@ export const translations: Record<Locale, Record<TranslationKeys, string>> = {
     backToMenu: "Menüye Dön",
     retakeInfoTooltip:
       "Yeniden çekim hakkınız: Aynı sahne için maksimum 2 kez yeniden çekim yapabilirsiniz. Bu haklar tükendikten sonra sadece düzenleme yapabilirsiniz.",
+    selectPhotoToStyle: "Filtre, aksesuar veya metin eklemek için önce fotoğraf çekin.",
+    startShootingWarning: "Çekime başlamak için önce arka plan seçmelisin",
   },
+
   en: {
     title: "Social Booth",
     modalTitle: "GDPR Approval",
@@ -423,7 +428,11 @@ export const translations: Record<Locale, Record<TranslationKeys, string>> = {
     backToMenu: "Back to Menu",
     retakeInfoTooltip:
       "Your retake rights: You can retake up to 2 times for the same scene. After these rights are exhausted, you can only edit.",
+    selectPhotoToStyle:
+      "Please take a photo first to add filters, accessories, or text.",
+    startShootingWarning: "You must select a background first to start shooting",
   },
+
   de: {
     title: "Social Booth",
     modalTitle: "DSGVO-Zustimmung",
@@ -570,7 +579,12 @@ export const translations: Record<Locale, Record<TranslationKeys, string>> = {
     backToMenu: "Zurück zum Menü",
     retakeInfoTooltip:
       "Ihre Wiederholungsrechte: Sie können bis zu 2 Mal für dieselbe Szene wiederholen. Nachdem diese Rechte erschöpft sind, können Sie nur noch bearbeiten.",
+    selectPhotoToStyle:
+      "Bitte machen Sie zuerst ein Foto, um Filter, Zubehör oder Text hinzuzufügen.",
+    startShootingWarning:
+      "Sie müssen einen Hintergrund auswählen, um die Aufnahme zu starten",
   },
+
   fr: {
     title: "Social Booth",
     modalTitle: "Approbation RGPD",
@@ -717,7 +731,12 @@ export const translations: Record<Locale, Record<TranslationKeys, string>> = {
     backToMenu: "Retour au menu",
     retakeInfoTooltip:
       "Vos droits de reprise : Vous pouvez reprendre jusqu'à 2 fois pour la même scène. Après que ces droits soient épuisés, vous ne pouvez que modifier.",
+    selectPhotoToStyle:
+      "Veuillez d'abord prendre une photo pour ajouter des filtres, des accessoires ou du texte.",
+    startShootingWarning:
+      "Vous devez sélectionner un arrière-plan pour commencer la prise de vue",
   },
+
   ar: {
     title: "Social Booth",
     modalTitle: "الموافقة على حماية البيانات",
@@ -797,7 +816,9 @@ export const translations: Record<Locale, Record<TranslationKeys, string>> = {
     cancelText: "إلغاء",
     saveText: "حفظ",
     typeAwesome: "اكتب شيئًا رائعًا...",
+    selectPhotoToStyle: "يرجى التقاط صورة أولاً لإضافة فلاتر أو ملحقات أو نص.",
     sizeLabel: "الحجم",
+
     chooseColor: "اختر اللون",
     fontTab: "🔤 الخط",
     styleTab: "💫 النمط",
@@ -857,5 +878,6 @@ export const translations: Record<Locale, Record<TranslationKeys, string>> = {
     backToMenu: "العودة إلى القائمة",
     retakeInfoTooltip:
       "حقوق إعادة التقاط: يمكنك إعادة التقاط حتى مرتين لنفس المشهد. بعد استنفاد هذه الحقوق، يمكنك التحرير فقط.",
+    startShootingWarning: "يجب عليك اختيار خلفية أولا لبدء التصوير",
   },
 }

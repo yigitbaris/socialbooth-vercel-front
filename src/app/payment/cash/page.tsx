@@ -246,7 +246,13 @@ function CashPaymentPageContent() {
                       ""
 
                     // Kategori adına göre yönlendirme
-                    if (
+                    const sourceOrderId = params.get("sourceOrderId")
+                    if (sourceOrderId) {
+                      // Copy Print flow: Return to PrintAndShare with original photo source
+                      router.push(
+                        `/print-share?orderId=${orderId}&sourceOrderId=${sourceOrderId}`
+                      )
+                    } else if (
                       categoryName.toLowerCase().includes("phone") ||
                       categoryName.toLowerCase().includes("telefon")
                     ) {

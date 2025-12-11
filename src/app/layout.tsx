@@ -3,6 +3,7 @@ import "./globals.css"
 import { GlobalContextProvider } from "./context/GlobalContext"
 import { Providers } from "./providers"
 import PWARegister from "./PWARegister"
+import OfflineIndicator from "./components/OfflineIndicator"
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -20,6 +21,7 @@ export default function RootLayout({
         <GlobalContextProvider>
           <Providers>
             <PWARegister /> {/* 👈 burada */}
+            <OfflineIndicator />
             {children}
           </Providers>
         </GlobalContextProvider>

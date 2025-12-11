@@ -7,8 +7,7 @@
     "build": "next build",
     "start": "next dev",
     "start:prod": "next start",
-    "lint": "next lint",
-    "postinstall": "echo 'Skipping native canvas build'"
+    "lint": "next lint"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.5.1",
@@ -37,12 +36,6 @@
     "typescript": "^5"
   },
   "resolutions": {
-    "onnxruntime-web": "^1.21.0",
-    "canvas": "^0.0.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "canvas": "^0.0.0"
-    }
+    "onnxruntime-web": "^1.21.0"
   }
 }

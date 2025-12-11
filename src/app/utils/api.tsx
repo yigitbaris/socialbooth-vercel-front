@@ -136,6 +136,58 @@ const api = {
     }
   },
 
+  delete: async <T = any>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> => {
+    if (isOffline()) {
+      console.log("[Offline Mode] Returning mock data for DELETE:", url)
+      return {
+        data: { success: true, offline: true } as T,
+        status: 200,
+        statusText: "OK (Offline)",
+        headers: {},
+        config: config || {},
+      } as AxiosResponse<T>
+    }
+
+    try {
+      return await axiosInstance.delete<T>(url, config)
+    } catch (error) {
+      console.warn("[API Error] Falling back to offline data for DELETE:", url, error)
+      return {
+        data: { success: true, offline: true } as T,
+        status: 200,
+        statusText: "OK (Fallback)",
+        headers: {},
+        config: config || {},
+      } as AxiosResponse<T>
+    }
+  },
+
+  patch: async <T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> => {
+    if (isOffline()) {
+      console.log("[Offline Mode] Returning mock data for PATCH:", url)
+      return {
+        data: { success: true, offline: true } as T,
+        status: 200,
+        statusText: "OK (Offline)",
+        headers: {},
+        config: config || {},
+      } as AxiosResponse<T>
+    }
+
+    try {
+      return await axiosInstance.patch<T>(url, data, config)
+    } catch (error) {
+      console.warn("[API Error] Falling back to offline data for PATCH:", url, error)
+      return {
+        data: { success: true, offline: true } as T,
+        status: 200,
+        statusText: "OK (Fallback)",
+        headers: {},
+        config: config || {},
+      } as AxiosResponse<T>
+    }
+  },
+
   // Keep raw axios for special cases
   raw: axiosInstance,
 }

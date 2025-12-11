@@ -108,6 +108,34 @@ const api = {
     }
   },
 
+  put: async <T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> => {
+    // Check if offline first
+    if (isOffline()) {
+      console.log("[Offline Mode] Returning mock data for PUT:", url)
+      return {
+        data: { success: true, offline: true } as T,
+        status: 200,
+        statusText: "OK (Offline)",
+        headers: {},
+        config: config || {},
+      } as AxiosResponse<T>
+    }
+
+    // Try online request
+    try {
+      return await axiosInstance.put<T>(url, data, config)
+    } catch (error) {
+      console.warn("[API Error] Falling back to offline data for PUT:", url, error)
+      return {
+        data: { success: true, offline: true } as T,
+        status: 200,
+        statusText: "OK (Fallback)",
+        headers: {},
+        config: config || {},
+      } as AxiosResponse<T>
+    }
+  },
+
   // Keep raw axios for special cases
   raw: axiosInstance,
 }

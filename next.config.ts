@@ -127,6 +127,14 @@ module.exports = withPWA({
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Externalize canvas to prevent native build issues on Vercel
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      config.externals = config.externals || []
+      config.externals.push("canvas")
+    }
+    return config
+  },
   async rewrites() {
     return [
       {

@@ -3,118 +3,80 @@ const withPWA = require("next-pwa")({
   dest: "public",
   register: true,
   skipWaiting: true,
-  // Enable PWA in all environments for offline testing
   disable: false,
-  // Runtime caching configuration
   runtimeCaching: [
-    // Cache static assets
     {
       urlPattern: /^https?.*\.(png|jpg|jpeg|webp|svg|gif|ico|woff|woff2)$/,
       handler: "CacheFirst",
       options: {
         cacheName: "static-assets",
-        expiration: {
-          maxEntries: 200,
-          maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
-        },
+        expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
       },
     },
-    // Cache Next.js static files
     {
       urlPattern: /^\/_next\/static\/.*/i,
       handler: "CacheFirst",
       options: {
         cacheName: "next-static",
-        expiration: {
-          maxEntries: 100,
-          maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
-        },
+        expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 365 },
       },
     },
-    // Cache fonts
     {
       urlPattern: /^https?:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
       handler: "CacheFirst",
       options: {
         cacheName: "google-fonts",
-        expiration: {
-          maxEntries: 20,
-          maxAgeSeconds: 60 * 60 * 24 * 365,
-        },
+        expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
       },
     },
-    // Cache flag images
     {
       urlPattern: /^https:\/\/flagcdn\.com\/.*/i,
       handler: "CacheFirst",
       options: {
         cacheName: "flag-images",
-        expiration: {
-          maxEntries: 20,
-          maxAgeSeconds: 60 * 60 * 24 * 30,
-        },
+        expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 30 },
       },
     },
-    // Network first for API calls (will fallback to app's offline handler)
     {
       urlPattern: /\/api\/v1\/.*/i,
       handler: "NetworkFirst",
       options: {
         cacheName: "api-cache",
         networkTimeoutSeconds: 5,
-        expiration: {
-          maxEntries: 50,
-          maxAgeSeconds: 60 * 60, // 1 hour
-        },
+        expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 },
       },
     },
-    // Cache backgrounds and filters from local public folder
     {
       urlPattern: /^\/(backgrounds|filters)\/.*/i,
       handler: "CacheFirst",
       options: {
         cacheName: "media-assets",
-        expiration: {
-          maxEntries: 100,
-          maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
-        },
+        expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 7 },
       },
     },
-    // Cache mediapipe models
     {
       urlPattern: /^\/mediapipe\/.*/i,
       handler: "CacheFirst",
       options: {
         cacheName: "mediapipe-models",
-        expiration: {
-          maxEntries: 10,
-          maxAgeSeconds: 60 * 60 * 24 * 30,
-        },
+        expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 30 },
       },
     },
-    // Cache ML models
     {
       urlPattern: /^\/models\/.*/i,
       handler: "CacheFirst",
       options: {
         cacheName: "ml-models",
-        expiration: {
-          maxEntries: 10,
-          maxAgeSeconds: 60 * 60 * 24 * 30,
-        },
+        expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 30 },
       },
     },
-    // Default handler for other requests
     {
       urlPattern: /.*/i,
       handler: "NetworkFirst",
       options: {
         cacheName: "others",
         networkTimeoutSeconds: 10,
-        expiration: {
-          maxEntries: 32,
-          maxAgeSeconds: 60 * 60 * 24,
-        },
+        expiration: { maxEntries: 32, maxAgeSeconds: 60 * 60 * 24 },
       },
     },
   ],
@@ -127,7 +89,6 @@ module.exports = withPWA({
   eslint: {
     ignoreDuringBuilds: true,
   },
-  // Externalize canvas to prevent native build issues on Vercel
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.externals = config.externals || []

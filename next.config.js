@@ -6,12 +6,32 @@ const withPWA = require("next-pwa")({
   disable: false,
   cacheStartUrl: true,
   dynamicStartUrl: true,
-  buildExcludes: [
+    buildExcludes: [
     /app-build-manifest\.json$/,
     /build-manifest\.json$/,
     /react-loadable-manifest\.json$/
   ],
+
   runtimeCaching: [
+    // Cache specific dynamic pages (payment, photo) ignoring search params
+    {
+      urlPattern: ({ url }) => {
+        const isPayment = url.pathname.startsWith('/payment');
+        const isPhoto = url.pathname.startsWith('/photo');
+        return isPayment || isPhoto;
+      },
+      handler: "NetworkFirst",
+      options: {
+        cacheName: "dynamic-pages",
+        expiration: {
+          maxEntries: 50,
+          maxAgeSeconds: 60 * 60 * 24, // 24 hours
+        },
+        matchOptions: {
+          ignoreSearch: true,
+        },
+      },
+    },
     // Cache page navigations (HTML)
     {
       urlPattern: ({ request }) => request.mode === "navigate",

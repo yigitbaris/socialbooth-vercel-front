@@ -9,6 +9,8 @@ import {
   createOfflineOrder,
   getOfflineOrder,
   saveOfflineOrder,
+  updateOfflinePhotoCount,
+  prepareOfflinePayment,
 } from "./offlineData"
 
 const axiosInstance = axios.create({
@@ -44,6 +46,17 @@ const getOfflineResponse = (url: string, data?: any): any => {
     const order = createOfflineOrder(data.categoryId, data.language || "Türkçe")
     saveOfflineOrder(order.data)
     return order
+  }
+
+  // PUT requests
+  if (url.includes("/orders/selectPhotoCount/") && data) {
+    const orderId = url.split("/orders/selectPhotoCount/")[1]
+    return updateOfflinePhotoCount(orderId, data.photoCount)
+  }
+
+  if (url.includes("/orders/preparePayment/")) {
+    const orderId = url.split("/orders/preparePayment/")[1]
+    return prepareOfflinePayment(orderId)
   }
 
   // Default fallback
@@ -131,7 +144,7 @@ const api = {
     if (shouldForceOffline(url, data)) {
       console.log("[Offline Mode] Returning mock data for PUT:", url)
       return {
-        data: { success: true, offline: true } as T,
+        data: getOfflineResponse(url, data) as T,
         status: 200,
         statusText: "OK (Offline)",
         headers: {},
@@ -145,7 +158,7 @@ const api = {
     } catch (error) {
       console.warn("[API Error] Falling back to offline data for PUT:", url, error)
       return {
-        data: { success: true, offline: true } as T,
+        data: getOfflineResponse(url, data) as T,
         status: 200,
         statusText: "OK (Fallback)",
         headers: {},

@@ -122,8 +122,34 @@ export const getOfflineOrder = (orderId: string) => ({
     language: "Türkçe",
     status: "pending",
     totalAmount: OFFLINE_CATEGORY.price,
+    photoCount: 1,
     createdAt: new Date().toISOString(),
     isOffline: orderId.startsWith("offline_"),
+  },
+})
+
+// Update Photo Count Mock (simulates /orders/selectPhotoCount/:orderId response)
+export const updateOfflinePhotoCount = (orderId: string, photoCount: number) => ({
+  success: true,
+  data: {
+    _id: orderId,
+    categoryId: OFFLINE_CATEGORY,
+    language: "Türkçe",
+    status: "pending",
+    photoCount,
+    totalAmount: OFFLINE_CATEGORY.price * photoCount,
+    createdAt: new Date().toISOString(),
+    isOffline: true,
+  },
+})
+
+// Prepare Payment Mock (simulates /orders/preparePayment/:orderId response)
+export const prepareOfflinePayment = (orderId: string) => ({
+  success: true,
+  data: {
+    orderId,
+    paymentPrepared: true,
+    isOffline: true,
   },
 })
 

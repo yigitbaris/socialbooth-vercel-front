@@ -6,6 +6,11 @@ const withPWA = require("next-pwa")({
   disable: false,
   cacheStartUrl: true,
   dynamicStartUrl: true,
+  buildExcludes: [
+    /app-build-manifest\.json$/,
+    /build-manifest\.json$/,
+    /react-loadable-manifest\.json$/
+  ],
   runtimeCaching: [
     // Cache page navigations (HTML)
     {

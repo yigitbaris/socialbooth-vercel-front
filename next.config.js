@@ -4,7 +4,22 @@ const withPWA = require("next-pwa")({
   register: true,
   skipWaiting: true,
   disable: false,
+  cacheStartUrl: true,
+  dynamicStartUrl: true,
   runtimeCaching: [
+    // Cache page navigations (HTML)
+    {
+      urlPattern: ({ request }) => request.mode === "navigate",
+      handler: "StaleWhileRevalidate",
+      options: {
+        cacheName: "pages",
+        expiration: {
+          maxEntries: 50,
+          maxAgeSeconds: 60 * 60 * 24, // 24 hours
+        },
+      },
+    },
+    // Cache static assets
     {
       urlPattern: /^https?.*\.(png|jpg|jpeg|webp|svg|gif|ico|woff|woff2)$/,
       handler: "CacheFirst",
@@ -13,6 +28,7 @@ const withPWA = require("next-pwa")({
         expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
       },
     },
+    // Cache Next.js static files
     {
       urlPattern: /^\/_next\/static\/.*/i,
       handler: "CacheFirst",
@@ -21,6 +37,7 @@ const withPWA = require("next-pwa")({
         expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 365 },
       },
     },
+    // Cache fonts
     {
       urlPattern: /^https?:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
       handler: "CacheFirst",
@@ -29,6 +46,7 @@ const withPWA = require("next-pwa")({
         expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
       },
     },
+    // Cache flag images
     {
       urlPattern: /^https:\/\/flagcdn\.com\/.*/i,
       handler: "CacheFirst",
@@ -37,6 +55,7 @@ const withPWA = require("next-pwa")({
         expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 30 },
       },
     },
+    // Network first for API calls (will fallback to app's offline handler)
     {
       urlPattern: /\/api\/v1\/.*/i,
       handler: "NetworkFirst",
@@ -46,6 +65,7 @@ const withPWA = require("next-pwa")({
         expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 },
       },
     },
+    // Cache backgrounds and filters from local public folder
     {
       urlPattern: /^\/(backgrounds|filters)\/.*/i,
       handler: "CacheFirst",
@@ -54,6 +74,7 @@ const withPWA = require("next-pwa")({
         expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 7 },
       },
     },
+    // Cache mediapipe models
     {
       urlPattern: /^\/mediapipe\/.*/i,
       handler: "CacheFirst",
@@ -62,6 +83,7 @@ const withPWA = require("next-pwa")({
         expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 30 },
       },
     },
+    // Cache ML models
     {
       urlPattern: /^\/models\/.*/i,
       handler: "CacheFirst",
@@ -70,6 +92,7 @@ const withPWA = require("next-pwa")({
         expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 30 },
       },
     },
+    // Default handler for other requests
     {
       urlPattern: /.*/i,
       handler: "NetworkFirst",

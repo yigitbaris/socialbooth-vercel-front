@@ -50,11 +50,29 @@ const getOfflineResponse = (url: string, data?: any): any => {
   return { success: true, data: null, offline: true }
 }
 
+// Helper to check if request should force offline mode
+const shouldForceOffline = (url: string, data?: any) => {
+  // Check browser offline status
+  if (isOffline()) return true;
+
+  // Check URL for offline ID
+  if (url.includes("offline_")) return true;
+
+  // Check data payload for offline IDs
+  if (data) {
+    if (data.orderId && data.orderId.includes("offline_")) return true;
+    if (data.backgroundId && data.backgroundId.toString().startsWith("bg_")) return true;
+    if (data.filterId && data.filterId.toString().startsWith("filter")) return true;
+  }
+
+  return false;
+}
+
 // Wrapped API with offline fallback
 const api = {
   get: async <T = any>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> => {
     // Check if offline first
-    if (isOffline()) {
+    if (shouldForceOffline(url)) {
       console.log("[Offline Mode] Returning mock data for:", url)
       return {
         data: getOfflineResponse(url) as T,
@@ -82,7 +100,7 @@ const api = {
 
   post: async <T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> => {
     // Check if offline first
-    if (isOffline()) {
+    if (shouldForceOffline(url, data)) {
       console.log("[Offline Mode] Returning mock data for POST:", url)
       return {
         data: getOfflineResponse(url, data) as T,
@@ -110,7 +128,7 @@ const api = {
 
   put: async <T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> => {
     // Check if offline first
-    if (isOffline()) {
+    if (shouldForceOffline(url, data)) {
       console.log("[Offline Mode] Returning mock data for PUT:", url)
       return {
         data: { success: true, offline: true } as T,
@@ -137,7 +155,7 @@ const api = {
   },
 
   delete: async <T = any>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> => {
-    if (isOffline()) {
+    if (shouldForceOffline(url)) {
       console.log("[Offline Mode] Returning mock data for DELETE:", url)
       return {
         data: { success: true, offline: true } as T,
@@ -163,7 +181,7 @@ const api = {
   },
 
   patch: async <T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> => {
-    if (isOffline()) {
+    if (shouldForceOffline(url, data)) {
       console.log("[Offline Mode] Returning mock data for PATCH:", url)
       return {
         data: { success: true, offline: true } as T,
